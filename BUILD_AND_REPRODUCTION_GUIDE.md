@@ -402,24 +402,37 @@ To add a defense correctly:
 
 ### 8.1 Frozen static census
 
-[`src/llmsec/attacks/static.py`](src/llmsec/attacks/static.py) stores fixed banks
-of:
+[`src/llmsec/attacks/static.py`](src/llmsec/attacks/static.py) loads three
+human-editable target files from
+[`src/llmsec/attacks/corpus`](src/llmsec/attacks/corpus):
 
-- eight direct injections;
-- six policy-puppetry payloads;
-- four indirect payloads for RAG and Coding.
+- 36 Chatbot records;
+- 42 RAG records;
+- 30 Coding records.
 
 Each rendered attack receives:
 
-- attack ID;
+- family and globally unique definition ID;
 - target ID;
-- stable template index;
+- stable payload index;
+- source, version, reference, and license;
+- delivery channel, contamination label, and validation status;
 - suite label;
 - SHA-256 content hash.
 
-Static trials rotate through this frozen bank. They do not mutate in response
-to a defense. Therefore, the result is fixed-library coverage, not a claim
-about every possible prompt injection.
+Every applicable target/family set has six records. The runner rejects a
+seventh payload instead of rotating and repeating one. Static attacks do not
+mutate in response to a defense. Therefore, the result is fixed-library
+coverage, not a claim about every possible prompt injection.
+
+For `retrieved_document` and `repository_context` delivery, the malicious text
+is added to the target's untrusted external context while the target-facing
+user prompt stays benign. This is what makes an attack indirect.
+
+The [corpus README](src/llmsec/attacks/corpus/README.md) documents the record
+schema and extension procedure. The
+[sources file](src/llmsec/attacks/corpus/SOURCES.md) records pinned upstream
+research and licenses.
 
 ### 8.2 D6 adaptive reconstruction
 
@@ -623,7 +636,7 @@ parsing.
 The workspace contains three views:
 
 1. **Defense Matrix** — select targets, providers/models, attacks, defense
-   columns, trial counts, and run static pilots or the benign preflight.
+   columns, payload counts, and run static censuses or the benign preflight.
 2. **Attack Lab** — manually test one target/defense, submit exact candidates,
    run adaptive policies, and reopen durable chat history.
 3. **Run Archive** — inspect static and adaptive results as chat transcripts,
@@ -692,7 +705,7 @@ Run:
 
 ```bash
 .venv/bin/ruff check apps src tests
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 npm run build:web
 ```
 

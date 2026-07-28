@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 
 from llmsec.defenses.base import (
@@ -7,12 +6,7 @@ from llmsec.defenses.base import (
     DefenseStage,
     VerdictAction,
 )
-
-
-READ_PRIMITIVE = re.compile(
-    r"(?:open\s*\(|read_text\s*\(|cat\s+|type\s+|Get-Content\s+)",
-    re.IGNORECASE,
-)
+from llmsec.synthetic_effects import is_synthetic_protected_file_read
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,9 +20,7 @@ class CodingActionGate:
         protected_path = context.metadata.get("protected_path", "")
         prohibited = (
             context.target_id == "coding"
-            and protected_path
-            and protected_path.lower() in content.lower()
-            and READ_PRIMITIVE.search(content) is not None
+            and is_synthetic_protected_file_read(content, protected_path)
         )
         if prohibited:
             return DefenseDecision(

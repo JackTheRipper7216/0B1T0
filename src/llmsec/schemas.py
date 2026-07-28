@@ -4,7 +4,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, SecretStr
 
-
 TargetId = Literal["chatbot", "rag", "coding"]
 ProviderId = Literal["groq", "openai", "anthropic"]
 
@@ -38,8 +37,17 @@ class ProviderCatalogItem(BaseModel):
 class AttackCatalogItem(BaseModel):
     id: str
     name: str
-    mode: Literal["static", "adaptive"]
+    mode: Literal["static"] = "static"
     applicable_target_ids: list[TargetId]
+    payload_counts: dict[TargetId, int] = Field(default_factory=dict)
+    implementation_status: Literal["executable", "planned"] = "executable"
+
+
+class AdaptivePolicyCatalogItem(BaseModel):
+    id: Literal["crescendo", "pair", "tap"]
+    name: str
+    applicable_target_ids: list[TargetId]
+    requires_attacker_model: bool = False
 
 
 class DefenseVariantCatalogItem(BaseModel):
@@ -76,6 +84,7 @@ class CatalogResponse(BaseModel):
     targets: list[TargetCatalogItem]
     providers: list[ProviderCatalogItem]
     attacks: list[AttackCatalogItem]
+    adaptive_policies: list[AdaptivePolicyCatalogItem]
     defense_variants: list[DefenseVariantCatalogItem]
     defense_columns: list[DefenseColumnCatalogItem]
     metrics: list[MetricCatalogItem]
@@ -128,6 +137,19 @@ class MatrixRunTrialResponse(BaseModel):
     attack_instance_id: str
     attack_seed: int
     attack_id: str
+    attack_definition_id: str
+    attack_definition_name: str
+    attack_source: str
+    attack_source_reference: str
+    attack_source_version: str
+    attack_source_license: str
+    attack_delivery: Literal["user", "retrieved_document", "repository_context"]
+    attack_content_hash: str
+    attack_context: str
+    attack_recovery: Literal["none", "bounded_reversible"]
+    attack_contamination: str
+    attack_validation_status: str
+    attack_success_definition: Literal["exact_recovery"]
     model_id: str
     defense_column_id: str
     trial_index: int

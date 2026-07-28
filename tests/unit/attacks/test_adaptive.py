@@ -17,7 +17,6 @@ from llmsec.defenses.base import DefenseContext, VerdictAction
 from llmsec.defenses.regex_filter import RegexInputFilter
 from llmsec.oracle import RecoveryOracle
 
-
 D6_REVERSED_FIELDS = """tpmorp
 metsys
 eht

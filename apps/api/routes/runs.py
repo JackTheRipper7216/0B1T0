@@ -9,7 +9,6 @@ from fastapi.responses import Response
 from llmsec.infrastructure.run_archive import ArchivedRun, RunArchive
 from llmsec.schemas import ArchivedRunDetailResponse, ArchivedRunSummaryResponse
 
-
 router = APIRouter(tags=["run-archive"])
 run_archive = RunArchive()
 

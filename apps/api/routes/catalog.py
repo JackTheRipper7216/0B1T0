@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from llmsec.catalog import build_catalog
 from llmsec.schemas import CatalogResponse
 
-
 router = APIRouter(tags=["catalog"])
 
 

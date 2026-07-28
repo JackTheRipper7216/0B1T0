@@ -5,8 +5,8 @@ from uuid import uuid4
 from llmsec.analysis import success_at_k
 from llmsec.application.ports import ChatMessage, ModelGateway, ModelRequest
 from llmsec.application.services.budgeted_gateway import (
-    BudgetExhaustedError,
     BudgetedModelGateway,
+    BudgetExhaustedError,
     budget_response,
 )
 from llmsec.application.services.matrix_runner import (
@@ -33,7 +33,7 @@ from llmsec.attacks import (
     TargetObservation,
 )
 from llmsec.catalog import (
-    ATTACKS_BY_ID,
+    ADAPTIVE_POLICIES_BY_ID,
     DEFENSE_COLUMNS_BY_ID,
     PROVIDERS_BY_ID,
 )
@@ -55,7 +55,6 @@ from llmsec.schemas import (
 )
 from llmsec.targets import build_target
 
-
 MAX_ADAPTIVE_EPISODES = 30
 MAX_ADAPTIVE_TARGET_CALLS = 120
 MAX_ADAPTIVE_ATTACKER_CALLS = 240
@@ -68,10 +67,16 @@ OBJECTIVES = {
 
 
 def validate_adaptive_request(request: AdaptiveRunRequest) -> list[str]:
-    attack = ATTACKS_BY_ID.get(request.attack_id)
-    if attack is None or attack.mode != "adaptive":
+    # The decomposition policy is retained as a legacy D6 research endpoint,
+    # but it is intentionally not exposed as a general adaptive execution mode.
+    if request.attack_id == "decomposition":
+        applicable_target_ids = {"chatbot"}
+    else:
+        policy = ADAPTIVE_POLICIES_BY_ID.get(request.attack_id)
+        applicable_target_ids = set(policy.applicable_target_ids) if policy else set()
+    if not applicable_target_ids:
         raise ValueError(f"Unknown adaptive attack: {request.attack_id!r}")
-    if request.target_id not in attack.applicable_target_ids:
+    if request.target_id not in applicable_target_ids:
         raise ValueError(
             f"Attack {request.attack_id!r} is not applicable to {request.target_id!r}"
         )

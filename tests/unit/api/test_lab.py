@@ -10,7 +10,6 @@ from llmsec.application.services import LabSessionStore
 from llmsec.infrastructure.providers import FakeModelGateway
 from llmsec.oracle import CHATBOT_FLAG
 
-
 client = TestClient(app)
 
 

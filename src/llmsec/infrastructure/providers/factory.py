@@ -3,7 +3,6 @@ from llmsec.infrastructure.providers.anthropic import AnthropicModelGateway
 from llmsec.infrastructure.providers.groq import GroqModelGateway
 from llmsec.infrastructure.providers.openai import OpenAIModelGateway
 
-
 EXECUTABLE_PROVIDER_IDS = frozenset({"groq", "openai", "anthropic"})
 
 

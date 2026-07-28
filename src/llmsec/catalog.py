@@ -1,6 +1,8 @@
 import os
 
+from llmsec.attacks.static import get_static_attack_count
 from llmsec.schemas import (
+    AdaptivePolicyCatalogItem,
     AttackCatalogItem,
     CatalogResponse,
     DefenseColumnCatalogItem,
@@ -10,7 +12,6 @@ from llmsec.schemas import (
     ProviderCatalogItem,
     TargetCatalogItem,
 )
-
 
 TARGETS = [
     TargetCatalogItem(
@@ -127,42 +128,79 @@ ATTACKS = [
         name="Direct prompt injection",
         mode="static",
         applicable_target_ids=["chatbot", "rag", "coding"],
+        payload_counts={
+            target_id: get_static_attack_count("direct_prompt_injection", target_id)
+            for target_id in ("chatbot", "rag", "coding")
+        },
     ),
     AttackCatalogItem(
         id="indirect_prompt_injection",
         name="Indirect prompt injection",
         mode="static",
         applicable_target_ids=["rag", "coding"],
+        payload_counts={
+            target_id: get_static_attack_count("indirect_prompt_injection", target_id)
+            for target_id in ("rag", "coding")
+        },
     ),
     AttackCatalogItem(
-        id="decomposition",
-        name="Decomposition and reconstruction",
-        mode="adaptive",
-        applicable_target_ids=["chatbot", "rag", "coding"],
-    ),
-    AttackCatalogItem(
-        id="policy_puppetry",
-        name="Policy puppetry",
+        id="contextual_framing",
+        name="Contextual framing",
         mode="static",
         applicable_target_ids=["chatbot", "rag", "coding"],
+        payload_counts={
+            target_id: get_static_attack_count("contextual_framing", target_id)
+            for target_id in ("chatbot", "rag", "coding")
+        },
     ),
     AttackCatalogItem(
+        id="decomposition_reconstruction",
+        name="Decomposition and reconstruction",
+        mode="static",
+        applicable_target_ids=["chatbot", "rag"],
+        payload_counts={
+            target_id: get_static_attack_count(
+                "decomposition_reconstruction", target_id
+            )
+            for target_id in ("chatbot", "rag")
+        },
+    ),
+    AttackCatalogItem(
+        id="encoding_evasion",
+        name="Encoding and Unicode evasion",
+        mode="static",
+        applicable_target_ids=["chatbot", "rag"],
+        payload_counts={
+            target_id: get_static_attack_count("encoding_evasion", target_id)
+            for target_id in ("chatbot", "rag")
+        },
+    ),
+    AttackCatalogItem(
+        id="long_context_injection",
+        name="Long-context and many-shot injection",
+        mode="static",
+        applicable_target_ids=["chatbot", "rag", "coding"],
+        implementation_status="planned",
+    ),
+]
+
+ADAPTIVE_POLICIES = [
+    AdaptivePolicyCatalogItem(
         id="crescendo",
-        name="Crescendo multi-turn",
-        mode="adaptive",
+        name="Crescendo",
         applicable_target_ids=["chatbot", "rag"],
     ),
-    AttackCatalogItem(
+    AdaptivePolicyCatalogItem(
         id="pair",
-        name="PAIR iterative refinement",
-        mode="adaptive",
+        name="PAIR",
         applicable_target_ids=["chatbot", "rag", "coding"],
+        requires_attacker_model=True,
     ),
-    AttackCatalogItem(
+    AdaptivePolicyCatalogItem(
         id="tap",
-        name="TAP bounded attack tree",
-        mode="adaptive",
+        name="TAP",
         applicable_target_ids=["chatbot", "rag", "coding"],
+        requires_attacker_model=True,
     ),
 ]
 
@@ -259,62 +297,74 @@ DEFENSE_COLUMNS = [
         defense_variant_ids=[],
         applicable_target_ids=["chatbot", "rag", "coding"],
     ),
-    *[
-        DefenseColumnCatalogItem(
-            id=f"single:{variant.id}",
-            name=variant.name,
-            kind="single",
-            defense_variant_ids=[variant.id],
-            applicable_target_ids=variant.applicable_target_ids,
-        )
-        for variant in DEFENSE_VARIANTS
-    ],
+    DefenseColumnCatalogItem(
+        id="single:hardening_rule_v1",
+        name="Prompt hardening",
+        kind="single",
+        defense_variant_ids=["hardening_rule_v1"],
+        applicable_target_ids=["chatbot", "rag", "coding"],
+    ),
+    DefenseColumnCatalogItem(
+        id="single:input_regex_v1",
+        name="Input filter",
+        kind="single",
+        defense_variant_ids=["input_regex_v1"],
+        applicable_target_ids=["chatbot", "rag", "coding"],
+    ),
+    DefenseColumnCatalogItem(
+        id="single:output_recovery_v1",
+        name="Output filter",
+        kind="single",
+        defense_variant_ids=["output_recovery_v1"],
+        applicable_target_ids=["chatbot", "rag", "coding"],
+    ),
+    DefenseColumnCatalogItem(
+        id="single:access_rag_acl_v1",
+        name="Access control",
+        kind="single",
+        defense_variant_ids=["access_rag_acl_v1"],
+        applicable_target_ids=["rag"],
+    ),
+    DefenseColumnCatalogItem(
+        id="single:human_gate_v1",
+        name="Human-in-the-loop",
+        kind="single",
+        defense_variant_ids=["human_gate_v1"],
+        applicable_target_ids=["coding"],
+    ),
     DefenseColumnCatalogItem(
         id="combo:d6_legacy",
-        name="D6 legacy stack",
+        name="D6 stack",
         kind="combination",
         defense_variant_ids=["hardening_rule_v1", "input_regex_v1", "output_fuzzy_legacy_v1"],
         applicable_target_ids=["chatbot", "rag"],
     ),
+]
+
+# Hidden aliases keep archived runs and old API clients readable without
+# reintroducing implementation variants into the research UI.
+LEGACY_DEFENSE_COLUMNS = [
     DefenseColumnCatalogItem(
-        id="combo:text_max",
-        name="Text maximum stack",
-        kind="combination",
-        defense_variant_ids=[
-            "hardening_datamark_v1",
-            "input_prompt_guard_v1",
-            "output_recovery_v1",
-        ],
+        id="single:output_exact_v1",
+        name="Exact output filter (legacy)",
+        kind="single",
+        defense_variant_ids=["output_exact_v1"],
+        applicable_target_ids=["chatbot", "rag", "coding"],
+    ),
+    DefenseColumnCatalogItem(
+        id="single:output_fuzzy_legacy_v1",
+        name="Fuzzy output filter (legacy)",
+        kind="single",
+        defense_variant_ids=["output_fuzzy_legacy_v1"],
         applicable_target_ids=["chatbot", "rag"],
-    ),
-    DefenseColumnCatalogItem(
-        id="combo:rag_full",
-        name="RAG full applicable stack",
-        kind="combination",
-        defense_variant_ids=[
-            "hardening_datamark_v1",
-            "input_prompt_guard_v1",
-            "output_recovery_v1",
-            "access_rag_acl_v1",
-        ],
-        applicable_target_ids=["rag"],
-    ),
-    DefenseColumnCatalogItem(
-        id="combo:coding_full",
-        name="Coding full applicable stack",
-        kind="combination",
-        defense_variant_ids=[
-            "hardening_delimit_v1",
-            "input_prompt_guard_v1",
-            "output_recovery_v1",
-            "human_gate_v1",
-        ],
-        applicable_target_ids=["coding"],
     ),
 ]
 
-DEFENSE_COLUMNS_BY_ID = {column.id: column for column in DEFENSE_COLUMNS}
+DEFENSE_COLUMNS_BY_ID = {
+    column.id: column for column in [*DEFENSE_COLUMNS, *LEGACY_DEFENSE_COLUMNS]
+}
 ATTACKS_BY_ID = {attack.id: attack for attack in ATTACKS}
+ADAPTIVE_POLICIES_BY_ID = {policy.id: policy for policy in ADAPTIVE_POLICIES}
 TARGETS_BY_ID = {target.id: target for target in TARGETS}
 
 
@@ -339,6 +389,7 @@ def build_catalog() -> CatalogResponse:
         targets=TARGETS,
         providers=providers,
         attacks=ATTACKS,
+        adaptive_policies=ADAPTIVE_POLICIES,
         defense_variants=DEFENSE_VARIANTS,
         defense_columns=DEFENSE_COLUMNS,
         metrics=METRICS,

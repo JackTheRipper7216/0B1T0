@@ -13,7 +13,7 @@ __all__ = [
     "CodingTarget",
     "PiiTarget",
     "RagTarget",
-    "TargetTurnResult",
     "TargetRuntime",
+    "TargetTurnResult",
     "build_target",
 ]

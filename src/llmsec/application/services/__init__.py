@@ -5,8 +5,8 @@ from llmsec.application.services.adaptive_runner import (
     validate_adaptive_request,
 )
 from llmsec.application.services.budgeted_gateway import (
-    BudgetExhaustedError,
     BudgetedModelGateway,
+    BudgetExhaustedError,
 )
 from llmsec.application.services.lab_sessions import LabSession, LabSessionStore
 from llmsec.application.services.matrix_runner import (
@@ -16,13 +16,13 @@ from llmsec.application.services.matrix_runner import (
 )
 
 __all__ = [
-    "run_adaptive_matrix",
-    "validate_adaptive_request",
+    "MAX_STATIC_ARMS",
     "BudgetExhaustedError",
     "BudgetedModelGateway",
     "LabSession",
     "LabSessionStore",
-    "MAX_STATIC_ARMS",
+    "run_adaptive_matrix",
     "run_static_matrix",
+    "validate_adaptive_request",
     "validate_static_matrix_request",
 ]

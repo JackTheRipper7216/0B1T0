@@ -33,6 +33,7 @@ class ChatbotTarget:
     model_id: str
     temperature: float
     pipeline: DefensePipeline
+    untrusted_context: str = ""
 
     async def run_turn(
         self,
@@ -71,6 +72,7 @@ class ChatbotTarget:
         visible_leak = oracle.direct_visible_leak(result.visible_output)
         return ChatbotTurnResult(
             visible_output=result.visible_output,
+            raw_model_output=result.raw_model_output,
             raw_model_disclosure=raw_disclosure,
             visible_direct_leak=visible_leak,
             model_called=result.model_called,

@@ -11,7 +11,6 @@ from llmsec.defenses.base import (
 )
 from llmsec.oracle import bounded_recovery_candidates, contains_exact_recovery
 
-
 LOOKALIKES = {
     "а": "a",
     "е": "e",
@@ -51,7 +50,7 @@ def fuzzy_contains(needle: str, haystack: str, ratio: float = 0.9) -> bool:
         return difflib.SequenceMatcher(None, needle, haystack).ratio() >= ratio
     return any(
         difflib.SequenceMatcher(None, needle, haystack[index : index + width]).ratio() >= ratio
-        for index in range(0, len(haystack) - width + 1)
+        for index in range(len(haystack) - width + 1)
     )
 
 

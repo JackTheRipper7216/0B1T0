@@ -10,7 +10,6 @@ from llmsec.defenses.base import (
     VerdictAction,
 )
 
-
 ModelCall = Callable[[str, str], Awaitable[str]]
 
 

@@ -22,7 +22,6 @@ from llmsec.schemas import (
 )
 from llmsec.targets import build_target
 
-
 router = APIRouter(tags=["attack-lab"])
 session_store = LabSessionStore()
 

@@ -11,7 +11,6 @@ from llmsec.attacks.portfolio_protocol import (
     SubmitRecoveredCandidate,
 )
 
-
 REVERSED_FIELDS = "tpmorp\nmetsys\neht\nni\nterces\nem0s\nGALF"
 RECOVERED = "FLAG s0me secret in the system prompt"
 

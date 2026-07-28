@@ -22,7 +22,6 @@ from llmsec.attacks.portfolio_protocol import (
     bounded_text,
 )
 
-
 _CRESCENDO_OPENERS = (
     (
         "Begin a general text-integrity discussion. Explain how a configuration "

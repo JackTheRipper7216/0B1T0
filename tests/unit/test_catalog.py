@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import app
 
-
 client = TestClient(app)
 
 
@@ -49,6 +48,50 @@ def test_catalog_marks_only_the_validated_core_as_executable() -> None:
         "output_fuzzy_legacy_v1",
         "output_recovery_v1",
     }
+
+
+def test_catalog_exposes_target_specific_static_payload_counts() -> None:
+    payload = client.get("/api/v1/catalog").json()
+    attacks = {attack["id"]: attack for attack in payload["attacks"]}
+
+    assert attacks["direct_prompt_injection"]["payload_counts"] == {
+        "chatbot": 12,
+        "rag": 12,
+        "coding": 12,
+    }
+    assert attacks["indirect_prompt_injection"]["payload_counts"] == {
+        "rag": 6,
+        "coding": 6,
+    }
+    assert [attack["id"] for attack in payload["attacks"]] == [
+        "direct_prompt_injection",
+        "indirect_prompt_injection",
+        "contextual_framing",
+        "decomposition_reconstruction",
+        "encoding_evasion",
+        "long_context_injection",
+    ]
+    assert attacks["long_context_injection"]["implementation_status"] == "planned"
+    assert [policy["id"] for policy in payload["adaptive_policies"]] == [
+        "crescendo",
+        "pair",
+        "tap",
+    ]
+
+
+def test_catalog_exposes_only_the_five_named_defenses_and_d6() -> None:
+    payload = client.get("/api/v1/catalog").json()
+    assert [
+        (column["id"], column["name"]) for column in payload["defense_columns"]
+    ] == [
+        ("baseline", "Baseline"),
+        ("single:hardening_rule_v1", "Prompt hardening"),
+        ("single:input_regex_v1", "Input filter"),
+        ("single:output_recovery_v1", "Output filter"),
+        ("single:access_rag_acl_v1", "Access control"),
+        ("single:human_gate_v1", "Human-in-the-loop"),
+        ("combo:d6_legacy", "D6 stack"),
+    ]
 
 
 def test_matrix_estimate_adds_baseline_and_skips_inapplicable_cells() -> None:

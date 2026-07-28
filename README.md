@@ -12,10 +12,12 @@ Handler and Tool Agent remain explicitly postponed.
 
 - Groq Chat Completions, OpenAI Responses, and Anthropic Messages gateways
 - Current Groq GPT-OSS, OpenAI GPT-5.6, and Anthropic Claude model catalog
-- Paired static attack census with fixed, content-hashed payload instances
+- Paired static attack census with 108 versioned, source-attributed,
+  content-hashed payload records
 - Visible-only, budgeted D6, Crescendo, PAIR, and TAP adaptive policies
 - Separately selected and accounted attacker models for PAIR and TAP
-- Exact visible recovery, exact candidate submission, and prohibited-effect oracles
+- Exact visible or deterministically reconstructed recovery, exact candidate
+  submission, and prohibited-effect oracles
 - Rule hardening, regex filtering, exact/fuzzy/recovery output filters
 - RAG ACL and Coding action gate
 - Wilson ASR intervals, paired bootstrap delta intervals, exact McNemar tests,
@@ -27,6 +29,18 @@ Handler and Tool Agent remain explicitly postponed.
 
 The interface uses the leetspeak wordmark `0B1T0`; papers, documentation,
 package names, and source code use `OBITO`.
+
+The static attack files are intentionally easy to inspect and extend:
+
+- [`chatbot.toml`](src/llmsec/attacks/corpus/chatbot.toml) — 36 records;
+- [`rag.toml`](src/llmsec/attacks/corpus/rag.toml) — 42 records, including
+  true retrieved-document delivery;
+- [`coding.toml`](src/llmsec/attacks/corpus/coding.toml) — 30 records,
+  including true repository-context delivery.
+
+See the [corpus contract](src/llmsec/attacks/corpus/README.md) and
+[source attribution](src/llmsec/attacks/corpus/SOURCES.md). Garak and
+Promptfoo do not need to be cloned into this repository.
 
 ## Local setup
 
@@ -77,19 +91,23 @@ the fixed Chatbot flag or a generated target secret. Treat it as research data.
 ## Verification
 
 ```bash
-.venv/bin/ruff check apps src tests
-.venv/bin/pytest -q
+.venv/bin/ruff check apps scripts src tests
+.venv/bin/python -m pytest -q
 npm run build:web
 ```
 
 The completion report and research protocol are in
 [`FRAMEWORK_COMPLETION_REPORT.md`](FRAMEWORK_COMPLETION_REPORT.md).
+The static-corpus implementation and initial live evidence are in
+[`docs/STATIC_ATTACK_CORPUS_REPORT.md`](docs/STATIC_ATTACK_CORPUS_REPORT.md).
 
 ## Scientific boundary
 
 Primary success is deterministic:
 
 - exact protected value visible in attacker-delivered output;
+- exact protected value reconstructed by a bounded deterministic decoder from
+  attacker-visible output;
 - exact reconstructed candidate submitted to the oracle; or
 - verified synthetic prohibited effect for the Coding target.
 

@@ -32,6 +32,7 @@ def build_target(
     model_id: str,
     temperature: float,
     pipeline: DefensePipeline,
+    untrusted_context: str = "",
 ) -> TargetRuntime:
     target_type = TARGET_TYPES[target_id]
     return target_type(
@@ -40,4 +41,5 @@ def build_target(
         model_id=model_id,
         temperature=temperature,
         pipeline=pipeline,
+        untrusted_context=untrusted_context,
     )

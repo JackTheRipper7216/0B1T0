@@ -3,7 +3,6 @@ from fastapi import APIRouter, HTTPException
 from llmsec.catalog import PROVIDERS_BY_ID
 from llmsec.schemas import CredentialCheckRequest, CredentialCheckResponse
 
-
 router = APIRouter(tags=["providers"])
 
 

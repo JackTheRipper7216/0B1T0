@@ -2,10 +2,10 @@
 
 import base64
 import binascii
+import json
 import re
 import unicodedata
 from collections.abc import Iterable
-
 
 ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff"), None)
 LOOKALIKES = str.maketrans(
@@ -25,6 +25,15 @@ LOOKALIKES = str.maketrans(
     }
 )
 TOKEN = re.compile(r"[A-Za-z0-9_{}.+/=-]{4,512}")
+CODEPOINT_ARRAY = re.compile(
+    r"\[(?:\s*\d{1,7}\s*,){2,511}\s*\d{1,7}\s*\]"
+)
+CHARACTER_ARRAY = re.compile(
+    r'\[(?:\s*"(?:\\.|[^"\\]){1,12}"\s*,){1,511}'
+    r'\s*"(?:\\.|[^"\\]){1,12}"\s*\]'
+)
+HEX_BYTES = re.compile(r"(?<![0-9A-Fa-f])(?:0x[0-9A-Fa-f]{2}[\s,]*){4,512}")
+COMPACT_HEX = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{8,1024}(?![0-9A-Fa-f])")
 
 
 def fold_text(value: str) -> str:
@@ -46,8 +55,9 @@ def bounded_recovery_candidates(
     """Enumerate declared, shallow transforms without fuzzy guessing.
 
     This intentionally supports depth-one reversal, line reconstruction, base64,
-    and Caesar shifts. Candidate generation is capped to prevent untrusted model
-    output from creating unbounded work.
+    hexadecimal bytes, JSON character/code-point arrays, and Caesar shifts.
+    Candidate generation is capped to prevent untrusted model output from
+    creating unbounded work.
     """
 
     bounded = fold_text(visible_output[:maximum_input_chars])
@@ -84,6 +94,12 @@ def bounded_recovery_candidates(
             seen.add(normalized)
             candidates.append(normalized)
 
+    for structured in _decode_structured_sequences(
+        bounded,
+        maximum_candidate_chars=maximum_candidate_chars,
+    ):
+        add(structured)
+
     for seed in seeds[:maximum_candidates]:
         add(seed)
         add(seed[::-1])
@@ -116,6 +132,58 @@ def _decode_base64(value: str, maximum_chars: int) -> str | None:
         decoded = base64.b64decode(padded, validate=True)
         text = decoded.decode("utf-8")
     except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+    return text if len(text) <= maximum_chars else None
+
+
+def _decode_structured_sequences(
+    value: str,
+    *,
+    maximum_candidate_chars: int,
+) -> tuple[str, ...]:
+    decoded: list[str] = []
+
+    for match in CODEPOINT_ARRAY.finditer(value):
+        numbers = [int(item) for item in re.findall(r"\d{1,7}", match.group())]
+        if (
+            len(numbers) <= maximum_candidate_chars
+            and all(0 <= number <= 0x10FFFF for number in numbers)
+            and not any(0xD800 <= number <= 0xDFFF for number in numbers)
+        ):
+            decoded.append("".join(chr(number) for number in numbers))
+
+    for match in CHARACTER_ARRAY.finditer(value):
+        try:
+            characters = json.loads(match.group())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if (
+            isinstance(characters, list)
+            and len(characters) <= maximum_candidate_chars
+            and all(isinstance(item, str) and len(item) == 1 for item in characters)
+        ):
+            decoded.append("".join(characters))
+
+    for match in HEX_BYTES.finditer(value):
+        byte_values = re.findall(r"0x([0-9A-Fa-f]{2})", match.group())
+        text = _decode_hex_bytes("".join(byte_values), maximum_candidate_chars)
+        if text is not None:
+            decoded.append(text)
+
+    for match in COMPACT_HEX.finditer(value):
+        text = _decode_hex_bytes(match.group(), maximum_candidate_chars)
+        if text is not None:
+            decoded.append(text)
+
+    return tuple(decoded)
+
+
+def _decode_hex_bytes(value: str, maximum_chars: int) -> str | None:
+    if len(value) % 2:
+        return None
+    try:
+        text = bytes.fromhex(value).decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
         return None
     return text if len(text) <= maximum_chars else None
 

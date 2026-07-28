@@ -30,8 +30,17 @@ export interface Provider {
 export interface Attack {
   id: string;
   name: string;
-  mode: "static" | "adaptive";
+  mode: "static";
   applicable_target_ids: TargetId[];
+  payload_counts: Partial<Record<TargetId, number>>;
+  implementation_status: "executable" | "planned";
+}
+
+export interface AdaptivePolicy {
+  id: "crescendo" | "pair" | "tap";
+  name: string;
+  applicable_target_ids: TargetId[];
+  requires_attacker_model: boolean;
 }
 
 export interface DefenseVariant {
@@ -62,6 +71,7 @@ export interface Catalog {
   targets: Target[];
   providers: Provider[];
   attacks: Attack[];
+  adaptive_policies: AdaptivePolicy[];
   defense_variants: DefenseVariant[];
   defense_columns: DefenseColumn[];
   metrics: Metric[];
@@ -84,6 +94,19 @@ export interface MatrixRunTrial {
   attack_instance_id: string;
   attack_seed: number;
   attack_id: string;
+  attack_definition_id: string;
+  attack_definition_name: string;
+  attack_source: string;
+  attack_source_reference: string;
+  attack_source_version: string;
+  attack_source_license: string;
+  attack_delivery: "user" | "retrieved_document" | "repository_context";
+  attack_content_hash: string;
+  attack_context: string;
+  attack_recovery: "none" | "bounded_reversible";
+  attack_contamination: string;
+  attack_validation_status: string;
+  attack_success_definition: "exact_recovery";
   model_id: string;
   defense_column_id: string;
   trial_index: number;

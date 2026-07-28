@@ -2,6 +2,7 @@ import os
 
 from fastapi import APIRouter, HTTPException
 
+from apps.api.routes.runs import run_archive
 from llmsec.application.ports import ModelGateway
 from llmsec.application.services import (
     run_adaptive_matrix,
@@ -12,7 +13,6 @@ from llmsec.application.services import (
 from llmsec.catalog import PROVIDERS_BY_ID
 from llmsec.infrastructure.providers import ModelGatewayError, build_model_gateway
 from llmsec.infrastructure.providers.factory import EXECUTABLE_PROVIDER_IDS
-from apps.api.routes.runs import run_archive
 from llmsec.matrix import estimate_matrix
 from llmsec.schemas import (
     AdaptiveRunRequest,
@@ -22,7 +22,6 @@ from llmsec.schemas import (
     MatrixRunRequest,
     MatrixRunResponse,
 )
-
 
 router = APIRouter(tags=["matrix"])
 

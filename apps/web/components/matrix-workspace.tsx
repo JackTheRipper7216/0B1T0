@@ -27,7 +27,6 @@ import type {
   BenignBenchmark,
   Catalog,
   CredentialCheck,
-  DefenseVariant,
   LabMessageResult,
   LabSession,
   LabSessionDetail,
@@ -36,14 +35,6 @@ import type {
   ProviderId,
   TargetId,
 } from "@/lib/types";
-
-const familyLabels: Record<DefenseVariant["family"], string> = {
-  prompt_hardening: "Prompt hardening",
-  input_filter: "Input filtering",
-  output_filter: "Output filtering",
-  access_control: "Access control",
-  human_gate: "Human approval",
-};
 
 function toggleValue<T>(items: T[], value: T): T[] {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value];
@@ -54,7 +45,7 @@ export function MatrixWorkspace() {
   const [catalogError, setCatalogError] = useState("");
   const [activeView, setActiveView] = useState<"matrix" | "attack-lab" | "runs">("matrix");
   const [targets, setTargets] = useState<TargetId[]>(["chatbot"]);
-  const [attacks, setAttacks] = useState<string[]>(["direct_prompt_injection", "decomposition"]);
+  const [attacks, setAttacks] = useState<string[]>(["direct_prompt_injection", "contextual_framing"]);
   const [providers, setProviders] = useState<ProviderId[]>(["groq"]);
   const [labProvider, setLabProvider] = useState<ProviderId>("groq");
   const [models, setModels] = useState<Record<ProviderId, string>>({
@@ -69,10 +60,10 @@ export function MatrixWorkspace() {
     "baseline",
     "single:hardening_rule_v1",
     "single:input_regex_v1",
-    "single:output_exact_v1",
+    "single:output_recovery_v1",
     "combo:d6_legacy",
   ]);
-  const [trials, setTrials] = useState(30);
+  const [trials, setTrials] = useState(3);
   const [maxTurns, setMaxTurns] = useState(6);
   const [temperature, setTemperature] = useState(0);
   const [estimate, setEstimate] = useState<MatrixEstimate | null>(null);
@@ -164,16 +155,13 @@ export function MatrixWorkspace() {
     [catalog, targets],
   );
 
-  const groupedDefenses = useMemo(() => {
-    if (!catalog) return [];
-    return Object.entries(familyLabels).map(([family, label]) => ({
-      family,
-      label,
-      variants: catalog.defense_variants.filter(
-        (variant) => variant.family === family && variant.implementation_status === "executable" && variant.applicable_target_ids.some((id) => targets.includes(id)),
-      ),
-    })).filter((group) => group.variants.length);
-  }, [catalog, targets]);
+  const singleDefenses = useMemo(
+    () => catalog?.defense_columns.filter(
+      (column) => column.kind === "single"
+        && column.applicable_target_ids.some((id) => targets.includes(id)),
+    ) ?? [],
+    [catalog, targets],
+  );
 
   const combinations = useMemo(
     () => catalog?.defense_columns.filter(
@@ -194,7 +182,7 @@ export function MatrixWorkspace() {
   const executableStaticAttacks = useMemo(
     () => applicableAttacks.filter(
       (attack) => attacks.includes(attack.id)
-        && attack.mode === "static",
+        && attack.implementation_status === "executable",
     ),
     [applicableAttacks, attacks],
   );
@@ -206,6 +194,20 @@ export function MatrixWorkspace() {
       : [],
     [catalog, columns, targets],
   );
+  const staticPayloadCapacity = useMemo(
+    () => targets.length === 1 && executableStaticAttacks.length
+      ? Math.min(...executableStaticAttacks.map(
+        (attack) => attack.payload_counts[targets[0]] ?? 0,
+      ))
+      : 0,
+    [executableStaticAttacks, targets],
+  );
+  const staticPlannedArms = targets.length === 1
+    ? executableStaticAttacks.length
+      * modelIds.length
+      * new Set(["baseline", ...staticColumnIds]).size
+      * trials
+    : 0;
   const benchmarkColumnIds = useMemo(
     () => columns.filter((columnId) => {
       const column = catalog?.defense_columns.find((item) => item.id === columnId);
@@ -219,10 +221,18 @@ export function MatrixWorkspace() {
 
   const staticPilotReady = targets.length === 1
     && executableStaticAttacks.length > 0
+    && trials >= 1
+    && trials <= staticPayloadCapacity
     && providers.every((providerId) => {
       const provider = catalog?.providers.find((item) => item.id === providerId);
       return Boolean(credentials[providerId]) || Boolean(provider?.configured_from_env);
     });
+
+  useEffect(() => {
+    if (staticPayloadCapacity > 0 && trials > staticPayloadCapacity) {
+      setTrials(staticPayloadCapacity);
+    }
+  }, [staticPayloadCapacity, trials]);
 
   function toggleTarget(targetId: TargetId) {
     if (targets.includes(targetId) && targets.length === 1) return;
@@ -278,7 +288,7 @@ export function MatrixWorkspace() {
         attack_ids: executableStaticAttacks.map((attack) => attack.id),
         model_ids: modelIds,
         defense_column_ids: staticColumnIds,
-        trials: 1,
+        trials,
         temperature,
         credentials: Object.fromEntries(
           providers
@@ -287,7 +297,7 @@ export function MatrixWorkspace() {
         ),
       });
       setMatrixRun(result);
-      setNotice(`Static pilot completed: ${result.total_arms} paired arms.`);
+      setNotice(`Static census completed: ${result.total_arms} paired arms.`);
       window.setTimeout(() => setNotice(""), 3600);
     } catch (error) {
       setMatrixRunError(error instanceof Error ? error.message : "Static matrix run failed");
@@ -357,8 +367,8 @@ export function MatrixWorkspace() {
 
         <div className="side-block compact-fields">
           <div className="side-heading"><span>Run controls</span></div>
-          <label>Trials per cell<input type="number" min="1" max="384" value={trials} onChange={(event) => setTrials(Number(event.target.value))} /></label>
-          <label>Maximum turns<input type="number" min="1" max="50" value={maxTurns} onChange={(event) => setMaxTurns(Number(event.target.value))} /></label>
+          <label>Static payloads per attack class<input type="number" min="1" max={Math.max(1, staticPayloadCapacity || 6)} value={trials} onChange={(event) => setTrials(Number(event.target.value))} /></label>
+          <label>Adaptive maximum turns<input type="number" min="1" max="50" value={maxTurns} onChange={(event) => setMaxTurns(Number(event.target.value))} /></label>
           <label>Temperature<div className="range-line"><input type="range" min="0" max="1" step="0.1" value={temperature} onChange={(event) => setTemperature(Number(event.target.value))} /><span>{temperature.toFixed(1)}</span></div>{temperatureUnsupported && <small>Omitted for selected Claude models</small>}</label>
         </div>
 
@@ -407,43 +417,32 @@ export function MatrixWorkspace() {
             </section>
 
             <section className="builder-section">
-              <div className="section-title"><span>02</span><div><h2>Attack rows</h2><p>Each selected attack becomes a row for every applicable target and model.</p></div></div>
+              <div className="section-title"><span>02</span><div><h2>Static attack classes</h2><p>The application supplies the objective; each selected class becomes a matrix row.</p></div></div>
               <div className="option-grid attacks-grid">
                 {applicableAttacks.map((attack) => (
-                  <button className={`option-button ${attacks.includes(attack.id) ? "selected" : ""}`} key={attack.id} onClick={() => setAttacks(toggleValue(attacks, attack.id))}>
+                  <button className={`option-button ${attacks.includes(attack.id) ? "selected" : ""}`} disabled={attack.implementation_status !== "executable"} key={attack.id} onClick={() => setAttacks(toggleValue(attacks, attack.id))}>
                     <span className="check-box">{attacks.includes(attack.id) ? "✓" : ""}</span>
-                    <span><strong>{attack.name}</strong><small>{attack.mode}</small></span>
+                    <span><strong>{attack.name}</strong><small>{attack.implementation_status === "planned" ? "Validated corpus pending" : targets.length === 1 ? `${attack.payload_counts[targets[0]] ?? 0} unique payloads` : "Static corpus"}</small></span>
                   </button>
                 ))}
               </div>
             </section>
 
             <section className="builder-section">
-              <div className="section-title"><span>03</span><div><h2>Validated-core defense columns</h2><p>Baseline is mandatory. Only executable Stage 1 variants are shown; deferred defenses remain catalogued.</p></div></div>
+              <div className="section-title"><span>03</span><div><h2>Five defense columns</h2><p>Baseline is mandatory. Each named defense is measured independently when applicable.</p></div></div>
               <div className="baseline-row"><span className="locked-check">✓</span><div><strong>Baseline</strong><small>No defenses · always included</small></div><span className="locked-label">Locked</span></div>
-              <div className="defense-families">
-                {groupedDefenses.map((group) => (
-                  <div className="defense-family" key={group.family}>
-                    <h3>{group.label}</h3>
-                    <div className="variant-list">
-                      {group.variants.map((variant) => {
-                        const columnId = `single:${variant.id}`;
-                        return (
-                          <button className={`variant ${columns.includes(columnId) ? "selected" : ""}`} key={variant.id} onClick={() => toggleColumn(columnId)}>
-                            <span className="check-box">{columns.includes(columnId) ? "✓" : ""}</span>
-                            <span><strong>{variant.name}</strong><small>{variant.description}</small></span>
-                            {variant.legacy && <em>Legacy</em>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+              <div className="option-grid">
+                {singleDefenses.map((defense) => (
+                  <button className={`option-button ${columns.includes(defense.id) ? "selected" : ""}`} key={defense.id} onClick={() => toggleColumn(defense.id)}>
+                    <span className="check-box">{columns.includes(defense.id) ? "✓" : ""}</span>
+                    <span><strong>{defense.name}</strong><small>Individual defense</small></span>
+                  </button>
                 ))}
               </div>
             </section>
 
             <section className="builder-section combinations-section">
-              <div className="section-title"><span>04</span><div><h2>Logical combinations</h2><p>Selected stacks are additional matrix columns—not replacements for single-defense measurements.</p></div></div>
+              <div className="section-title"><span>04</span><div><h2>D6 combination</h2><p>The frozen proof-of-concept stack remains an additional comparison column.</p></div></div>
               <div className="option-grid">
                 {combinations.map((combination) => (
                   <button className={`option-button ${columns.includes(combination.id) ? "selected" : ""}`} key={combination.id} onClick={() => toggleColumn(combination.id)}>
@@ -469,7 +468,7 @@ export function MatrixWorkspace() {
                           <tbody>
                             {selectedAttackRows.map((attack) => (
                               <tr key={attack.id}>
-                                <td><strong>{attack.name}</strong><span>{attack.mode}</span></td>
+                                <td><strong>{attack.name}</strong><span>static corpus</span></td>
                                 {selectedDefenseColumns.map((column) => {
                                   const applicable = attack.applicable_target_ids.includes(targetId) && column.applicable_target_ids.includes(targetId);
                                   return <td key={column.id}><span className={applicable ? "planned-cell" : "na-cell"}>{applicable ? "Planned" : "N/A"}</span></td>;
@@ -509,21 +508,21 @@ export function MatrixWorkspace() {
             <section className="launch-bar">
               <div className="launch-estimate">
                 <div><strong>{estimate?.matrix_cells ?? "—"}</strong><span>matrix cells</span></div>
-                <div><strong>{estimate?.trial_arms ?? "—"}</strong><span>trial arms</span></div>
-                <div><strong>{estimate?.maximum_model_calls ?? "—"}</strong><span>maximum calls</span></div>
+                <div><strong>{estimate?.trial_arms ?? "—"}</strong><span>configured arms</span></div>
+                <div><strong>{staticPlannedArms || "—"}</strong><span>static census calls</span></div>
                 {!!estimate?.skipped_inapplicable_cells && <div><strong>{estimate.skipped_inapplicable_cells}</strong><span>N/A cells skipped</span></div>}
               </div>
               <div className="launch-action">
                 {(estimateError || matrixRunError) && <small>{estimateError || matrixRunError}</small>}
                 {!staticPilotReady && !estimateError && !matrixRunError && <small>Select one application, at least one applicable static attack, and provide every selected provider key.</small>}
-                <button disabled={!estimate || !staticPilotReady || runningMatrix} onClick={() => void runStaticPilot()}>{runningMatrix ? "Running static pilot…" : "Run 1-trial static pilot"} <span>→</span></button>
+                <button disabled={!estimate || !staticPilotReady || runningMatrix} onClick={() => void runStaticPilot()}>{runningMatrix ? "Running static census…" : `Run ${trials}-payload paired census`} <span>→</span></button>
               </div>
             </section>
 
             {matrixRun && (
               <section className="static-run-results">
                 <header>
-                  <div><span className="overline">Latest {matrixRun.status.replace("_", " ")} pilot</span><h2>Static attack matrix</h2><p>Matched protected value, payload, seed, model, and trial index across every completed baseline–defense pair.</p></div>
+                  <div><span className="overline">Latest {matrixRun.status.replace("_", " ")} census</span><h2>Static attack matrix</h2><p>Matched protected value, immutable corpus record, model, and payload index across every completed baseline–defense pair.</p></div>
                   <div className="run-id"><span>Run</span><strong>{matrixRun.run_id.slice(0, 8)}</strong><small>{matrixRun.total_arms} arms · {matrixRun.budget.target_calls} calls</small></div>
                 </header>
                 <div className="static-results-table">
@@ -556,10 +555,11 @@ export function MatrixWorkspace() {
                     const defense = catalog.defense_columns.find((item) => item.id === trial.defense_column_id);
                     return (
                       <article className={`pilot-trace ${trial.success ? "success" : "failed"}`} key={`${trial.attack_id}:${trial.model_id}:${trial.defense_column_id}:${index}`}>
-                        <header><span>{defense?.name ?? trial.defense_column_id}</span><strong>{trial.success ? "Success" : "Failed"}</strong></header>
+                        <header><span>{defense?.name ?? trial.defense_column_id} · {trial.attack_definition_name}</span><strong>{trial.success ? "Success" : "Failed"}</strong></header>
                         <label>Attack input</label><p>{trial.attack_input}</p>
+                        {trial.attack_context && <><label>Injected {trial.attack_delivery.replace("_", " ")}</label><p>{trial.attack_context}</p></>}
                         <label>Visible output</label><p>{trial.visible_output || "No visible output"}</p>
-                        <footer><span>{trial.model_id}</span><span>{trial.input_tokens + trial.output_tokens} tokens</span>{trial.raw_model_disclosure && !trial.success && <span>Raw disclosure filtered</span>}</footer>
+                        <footer><span>{trial.model_id}</span><span>{trial.attack_source}</span><span>{trial.input_tokens + trial.output_tokens} tokens</span>{trial.raw_model_disclosure && !trial.success && <span>Raw disclosure filtered</span>}</footer>
                       </article>
                     );
                   })}
@@ -637,7 +637,7 @@ function RunArchive({
       {(error || detailError) && <div className="archive-error">{error || detailError}</div>}
       <div className="archive-layout">
         <div className="archive-list">
-          {visibleRuns.length === 0 ? <div className="empty-history"><strong>No completed runs yet</strong><p>Run a static pilot or paired adaptive attack first.</p></div> : visibleRuns.map((run) => {
+          {visibleRuns.length === 0 ? <div className="empty-history"><strong>No completed runs yet</strong><p>Run a static census or paired adaptive attack first.</p></div> : visibleRuns.map((run) => {
             const target = catalog.targets.find((item) => item.id === run.target_id);
             return (
               <div className={`archive-list-item ${selected?.run_id === run.run_id ? "selected" : ""}`} key={run.run_id}>
@@ -677,11 +677,12 @@ function ArchivedRunTranscript({ run, catalog }: { run: ArchivedRunDetail; catal
               <strong>{catalog.defense_columns.find((column) => column.id === trial.defense_column_id)?.name ?? trial.defense_column_id}</strong>
               <span className={`attempt-verdict ${trial.success ? "success" : "failed"}`}>{trial.success ? "Success" : "Failed"}</span>
             </header>
-            <article className="lab-message user"><label>Attacker</label><div>{trial.attack_input}</div></article>
+            <article className="lab-message user"><label>Attacker · {trial.attack_definition_name ?? trial.attack_id}</label><div>{trial.attack_input}</div></article>
+            {trial.attack_context && <article className="lab-message attacker-model"><label>Injected {trial.attack_delivery.replace("_", " ")}</label><div>{trial.attack_context}</div></article>}
             <article className="lab-message assistant">
-              <label>Target · Trial {trial.trial_index + 1}</label>
+              <label>Target · Payload {trial.trial_index}</label>
               <div>{trial.visible_output || "No attacker-visible output"}</div>
-              <footer><span>{trial.model_id}</span><span>{trial.input_tokens + trial.output_tokens} tokens</span><span>{trial.model_latency_ms.toFixed(0)} ms</span>{trial.raw_model_disclosure && !trial.success && <span className="blocked-badge">Raw disclosure filtered</span>}</footer>
+              <footer><span>{trial.model_id}</span>{trial.attack_source && <span>{trial.attack_source}</span>}<span>{trial.input_tokens + trial.output_tokens} tokens</span><span>{trial.model_latency_ms.toFixed(0)} ms</span>{trial.raw_model_disclosure && !trial.success && <span className="blocked-badge">Raw disclosure filtered</span>}</footer>
             </article>
           </section>
         ))}
@@ -754,7 +755,7 @@ function AttackLab({
   const [confirmedSuccessTurn, setConfirmedSuccessTurn] = useState<number | null>(null);
   const [adaptiveRun, setAdaptiveRun] = useState<AdaptiveRun | null>(null);
   const [runningAdaptive, setRunningAdaptive] = useState(false);
-  const [adaptivePolicy, setAdaptivePolicy] = useState<"decomposition" | "crescendo" | "pair" | "tap">("decomposition");
+  const [adaptivePolicy, setAdaptivePolicy] = useState<"crescendo" | "pair" | "tap">("crescendo");
   const [attackerProvider, setAttackerProvider] = useState<ProviderId>(selectedProvider);
   const [adaptiveTrials, setAdaptiveTrials] = useState(1);
   const [adaptiveMaxQueries, setAdaptiveMaxQueries] = useState(8);
@@ -767,7 +768,8 @@ function AttackLab({
   const liveReady = !sessionEnded && providerExecutable && (Boolean(activeApiKey) || activeProvider.configured_from_env);
   const attackerCatalogProvider = catalog.providers.find((item) => item.id === attackerProvider)!;
   const attackerReady = Boolean(credentials[attackerProvider]) || attackerCatalogProvider.configured_from_env;
-  const usesAttackerModel = adaptivePolicy === "pair" || adaptivePolicy === "tap";
+  const selectedAdaptivePolicy = catalog.adaptive_policies.find((policy) => policy.id === adaptivePolicy);
+  const usesAttackerModel = selectedAdaptivePolicy?.requires_attacker_model ?? false;
   const adaptiveArmCount = adaptiveTrials * (defenseColumn === "baseline" ? 1 : 2);
   const adaptiveCallCeiling = adaptiveArmCount * adaptiveMaxQueries;
   const adaptiveBudgetValid = adaptiveCallCeiling <= 120;
@@ -777,10 +779,8 @@ function AttackLab({
         (id) => catalog.defense_variants.find((variant) => variant.id === id)?.implementation_status === "executable",
       ),
   );
-  const adaptivePolicies = catalog.attacks.filter(
-    (attack) => attack.mode === "adaptive"
-      && attack.applicable_target_ids.includes(selectedTarget)
-      && ["decomposition", "crescendo", "pair", "tap"].includes(attack.id),
+  const adaptivePolicies = catalog.adaptive_policies.filter(
+    (policy) => policy.applicable_target_ids.includes(selectedTarget),
   );
   const successfulSessions = labSessions.filter((session) => session.status === "success").length;
   const failedSessions = labSessions.filter((session) => session.status === "failed").length;
@@ -809,13 +809,11 @@ function AttackLab({
     setLabError("");
     setAttackerProvider(selectedProvider);
     setDefenseColumn(selectedTarget === "chatbot" ? "combo:d6_legacy" : "baseline");
-    const firstPolicy = catalog.attacks.find(
-      (attack) => attack.mode === "adaptive"
-        && attack.applicable_target_ids.includes(selectedTarget)
-        && ["decomposition", "crescendo", "pair", "tap"].includes(attack.id),
+    const firstPolicy = catalog.adaptive_policies.find(
+      (policy) => policy.applicable_target_ids.includes(selectedTarget),
     );
     if (firstPolicy) {
-      setAdaptivePolicy(firstPolicy.id as "decomposition" | "crescendo" | "pair" | "tap");
+      setAdaptivePolicy(firstPolicy.id);
     }
   }, [selectedTarget, selectedProvider, selectedModel, temperature]);
 

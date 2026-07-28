@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-
 PRICE_SNAPSHOT_DATE = date(2026, 7, 24)
 MILLION = Decimal(1_000_000)
 

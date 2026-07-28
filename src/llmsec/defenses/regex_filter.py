@@ -8,7 +8,6 @@ from llmsec.defenses.base import (
     VerdictAction,
 )
 
-
 INJECTION_PATTERNS = (
     r"build key",
     r"system prompt",

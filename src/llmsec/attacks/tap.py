@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
 from llmsec.attacks.adaptive import (
     AdaptiveAttackBudget,
     classify_response,

@@ -5,7 +5,6 @@ from llmsec.catalog import DEFENSE_COLUMNS_BY_ID
 from llmsec.defenses import resolve_defense_column
 from llmsec.schemas import BenignBenchmarkRequest, BenignBenchmarkResponse
 
-
 router = APIRouter(tags=["benchmarks"])
 
 

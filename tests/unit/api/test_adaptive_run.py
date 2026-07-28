@@ -7,7 +7,6 @@ import apps.api.routes.matrix as matrix_route
 from apps.api.main import app
 from llmsec.application.ports import ModelRequest, ModelResponse, ModelUsage
 
-
 client = TestClient(app)
 
 

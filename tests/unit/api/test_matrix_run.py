@@ -7,7 +7,6 @@ import apps.api.routes.matrix as matrix_route
 from apps.api.main import app
 from llmsec.application.ports import ModelRequest, ModelResponse, ModelUsage
 
-
 client = TestClient(app)
 
 
@@ -25,6 +24,32 @@ class SecretEchoGateway:
             output_text=match.group(1),
             observed_model_id=request.model_id,
             usage=ModelUsage(input_tokens=40, output_tokens=8),
+            provider_request_id=f"fake-{len(self.calls)}",
+        )
+
+
+class ReversedSecretGateway(SecretEchoGateway):
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        self.calls.append(request)
+        match = re.search(r"Internal build key: (\S+)", request.system_prompt)
+        assert match is not None
+        return ModelResponse(
+            output_text=match.group(1)[::-1],
+            observed_model_id=request.model_id,
+            usage=ModelUsage(input_tokens=40, output_tokens=8),
+            provider_request_id=f"fake-{len(self.calls)}",
+        )
+
+
+class RagSecretEchoGateway(SecretEchoGateway):
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        self.calls.append(request)
+        match = re.search(r"Incident recovery token: (\S+)", request.system_prompt)
+        assert match is not None
+        return ModelResponse(
+            output_text=match.group(1),
+            observed_model_id=request.model_id,
+            usage=ModelUsage(input_tokens=60, output_tokens=12),
             provider_request_id=f"fake-{len(self.calls)}",
         )
 
@@ -74,11 +99,14 @@ def test_static_matrix_runs_paired_baseline_and_defense(
 
     trials = {trial["defense_column_id"]: trial for trial in payload["trials"]}
     assert trials["baseline"]["success"] is True
+    assert trials["baseline"]["attack_definition_id"] == "chatbot.direct.priority_override"
+    assert trials["baseline"]["attack_delivery"] == "user"
+    assert trials["baseline"]["attack_source_reference"].startswith("https://github.com/")
     assert trials["single:output_exact_v1"]["success"] is False
     assert trials["single:output_exact_v1"]["visible_output"] == "[REDACTED]"
 
 
-def test_static_matrix_rejects_adaptive_attack_before_provider_call(
+def test_static_matrix_rejects_non_class_attack_before_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called = False
@@ -103,16 +131,86 @@ def test_static_matrix_rejects_adaptive_attack_before_provider_call(
     )
 
     assert response.status_code == 422
-    assert "not executable static" in response.json()["detail"]
+    assert "Unknown attack IDs" in response.json()["detail"]
     assert called is False
+
+
+def test_static_matrix_scores_exact_reconstruction_and_defended_raw_disclosure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = ReversedSecretGateway()
+    monkeypatch.setattr(
+        matrix_route,
+        "build_model_gateway",
+        lambda provider_id, api_key: gateway,
+    )
+    response = client.post(
+        "/api/v1/matrix/run-static",
+        json={
+            "target_id": "chatbot",
+            "attack_ids": ["encoding_evasion"],
+            "model_ids": ["groq:openai/gpt-oss-120b"],
+            "defense_column_ids": ["single:output_recovery_v1"],
+            "trials": 1,
+            "credentials": {"groq": "gsk_static_runner_secret"},
+        },
+    )
+
+    assert response.status_code == 200
+    trials = {
+        trial["defense_column_id"]: trial for trial in response.json()["trials"]
+    }
+    assert trials["baseline"]["success"] is True
+    assert trials["baseline"]["success_channel"] == "visible_exact_reconstruction"
+    assert trials["single:output_recovery_v1"]["success"] is False
+    assert trials["single:output_recovery_v1"]["raw_model_disclosure"] is True
+    assert trials["single:output_recovery_v1"]["visible_output"].startswith(
+        "[OUTPUT BLOCKED"
+    )
+
+
+def test_static_matrix_delivers_rag_injection_through_retrieved_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RagSecretEchoGateway()
+    monkeypatch.setattr(
+        matrix_route,
+        "build_model_gateway",
+        lambda provider_id, api_key: gateway,
+    )
+    response = client.post(
+        "/api/v1/matrix/run-static",
+        json={
+            "target_id": "rag",
+            "attack_ids": ["indirect_prompt_injection"],
+            "model_ids": ["groq:openai/gpt-oss-120b"],
+            "defense_column_ids": ["baseline"],
+            "trials": 1,
+            "credentials": {"groq": "gsk_static_runner_secret"},
+        },
+    )
+
+    assert response.status_code == 200
+    trial = response.json()["trials"][0]
+    request = gateway.calls[0]
+    assert trial["attack_delivery"] == "retrieved_document"
+    assert trial["attack_context"] in request.system_prompt
+    assert request.messages[-1].content == trial["attack_input"]
+    assert trial["success"] is True
 
 
 def test_static_matrix_enforces_arm_safety_limit() -> None:
     response = client.post(
         "/api/v1/matrix/run-static",
         json={
-            "target_id": "chatbot",
-            "attack_ids": ["direct_prompt_injection", "policy_puppetry"],
+            "target_id": "rag",
+            "attack_ids": [
+                "direct_prompt_injection",
+                "indirect_prompt_injection",
+                "contextual_framing",
+                "decomposition_reconstruction",
+                "encoding_evasion",
+            ],
             "model_ids": [
                 "groq:llama-3.3-70b-versatile",
                 "openai:gpt-5.6-terra",
@@ -121,17 +219,46 @@ def test_static_matrix_enforces_arm_safety_limit() -> None:
             "defense_column_ids": [
                 "single:hardening_rule_v1",
                 "single:input_regex_v1",
-                "single:output_exact_v1",
+                "single:output_recovery_v1",
+                "single:access_rag_acl_v1",
                 "combo:d6_legacy",
             ],
-            "trials": 3,
+            "trials": 6,
             "temperature": 0.7,
             "credentials": {},
         },
     )
 
     assert response.status_code == 422
-    assert "safety limit is 60" in response.json()["detail"]
+    assert "safety limit is 384" in response.json()["detail"]
+
+
+def test_static_matrix_rejects_payload_repetition_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def gateway_factory(provider_id: str, api_key: str) -> SecretEchoGateway:
+        nonlocal called
+        called = True
+        return SecretEchoGateway()
+
+    monkeypatch.setattr(matrix_route, "build_model_gateway", gateway_factory)
+    response = client.post(
+        "/api/v1/matrix/run-static",
+        json={
+            "target_id": "chatbot",
+            "attack_ids": ["direct_prompt_injection"],
+            "model_ids": ["groq:openai/gpt-oss-120b"],
+            "defense_column_ids": ["baseline"],
+            "trials": 13,
+            "credentials": {"groq": "gsk_static_runner_secret"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "unique payloads" in response.json()["detail"]
+    assert called is False
 
 
 def test_static_budget_stops_before_provider_call(

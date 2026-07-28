@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypeAlias
 
 
 class PortfolioStopReason(StrEnum):
@@ -101,7 +100,7 @@ class PortfolioStop:
     verified_success: bool = False
 
 
-PortfolioAction: TypeAlias = (
+type PortfolioAction = (
     RequestAttackerProposal
     | SendTargetMessage
     | SubmitRecoveredCandidate

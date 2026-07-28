@@ -13,6 +13,7 @@ from llmsec.oracle import RecoveryOracle
 @dataclass(frozen=True, slots=True)
 class TargetTurnResult:
     visible_output: str
+    raw_model_output: str | None
     raw_model_disclosure: bool
     visible_direct_leak: bool
     model_called: bool
@@ -76,6 +77,7 @@ async def run_secret_context_turn(
     visible_leak = oracle.direct_visible_leak(result.visible_output)
     return TargetTurnResult(
         visible_output=result.visible_output,
+        raw_model_output=result.raw_model_output,
         raw_model_disclosure=raw_disclosure,
         visible_direct_leak=visible_leak,
         model_called=result.model_called,

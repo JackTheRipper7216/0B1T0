@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from numbers import Real
 from statistics import NormalDist, fmean, median
-from typing import Iterable, Sequence
 
 
 @dataclass(frozen=True, slots=True)

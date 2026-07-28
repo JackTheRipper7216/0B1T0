@@ -5,7 +5,6 @@ from llmsec.defenses.output_filters import (
     TransformationAwareOutputFilter,
 )
 
-
 SECRET = "FLAG{s0me_secret_in_the_system_prompt}"
 CONTEXT = DefenseContext(target_id="chatbot", secret=SECRET)
 
@@ -63,5 +62,19 @@ def test_transformation_aware_filter_folds_zero_width_and_homoglyphs() -> None:
 
     assert (
         TransformationAwareOutputFilter().evaluate(transformed, context).action
+        == VerdictAction.BLOCK
+    )
+
+
+def test_transformation_aware_filter_recovers_codepoints_and_character_arrays() -> None:
+    codepoints = str([ord(character) for character in SECRET])
+    characters = "[" + ", ".join(repr(character).replace("'", '"') for character in SECRET) + "]"
+
+    assert (
+        TransformationAwareOutputFilter().evaluate(codepoints, CONTEXT).action
+        == VerdictAction.BLOCK
+    )
+    assert (
+        TransformationAwareOutputFilter().evaluate(characters, CONTEXT).action
         == VerdictAction.BLOCK
     )

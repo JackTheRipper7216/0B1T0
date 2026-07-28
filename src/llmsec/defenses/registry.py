@@ -12,7 +12,6 @@ from llmsec.defenses.output_filters import (
 from llmsec.defenses.pipeline import DefensePipeline
 from llmsec.defenses.regex_filter import RegexInputFilter
 
-
 IMPLEMENTED_DEFENSE_FACTORIES = {
     "hardening_rule_v1": RuleReinforcementHardening,
     "input_regex_v1": RegexInputFilter,

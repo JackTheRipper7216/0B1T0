@@ -1,6 +1,6 @@
 # OBITO framework completion and research report
 
-Date: 2026-07-25  
+Date: 2026-07-26
 Scope: local, single-researcher LLM application-security testbed
 
 ## Executive result
@@ -14,8 +14,9 @@ and an integrated dark-blue web interface.
 
 This is deliberately not described as a production SaaS or a complete
 publication-scale attacker portfolio. PII Handler and Tool Agent remain
-postponed as agreed. Paid live-provider campaigns were not fired during
-completion.
+postponed as agreed. A bounded Groq baseline census was fired after the static
+corpus freeze; no paired live-defense or adaptive confirmatory campaign was
+fired.
 
 ## Implemented system
 
@@ -69,8 +70,10 @@ Seven defense variants are executable:
 - `human_gate_v1`
 
 `output_recovery_v1` closes the known D6 reversal gap using bounded, exact
-recovery checks for shallow reversal, line reconstruction, base64, Caesar, NFKC,
-and zero-width removal. It does not use fuzzy similarity to declare success.
+recovery checks for shallow reversal, line reconstruction, Base64, hexadecimal
+bytes, Caesar shifts, JSON character arrays, Unicode code-point arrays, NFKC,
+homoglyph folding, and zero-width removal. It does not use fuzzy similarity to
+declare success.
 
 Structured delimiter hardening, datamarking, and Prompt Guard 2 remain
 catalogued but deferred. The UI does not present a defense stack as executable
@@ -96,18 +99,36 @@ successful multi-turn episode is not counted as a failed attack.
 
 ## Attack side
 
-### Frozen static census v1
+### Frozen static census v2
 
-The executable fixed library contains:
+The executable fixed library now contains 108 records:
 
-- eight direct-injection templates per applicable target;
-- six policy-puppetry templates per applicable target;
-- four indirect-injection templates for RAG and Coding.
+- 36 Chatbot records across direct injection, prompt extraction, contextual
+  framing, policy puppetry, decomposition/reconstruction, and encoding evasion;
+- 42 RAG records across those six families plus indirect prompt injection;
+- 30 Coding records across direct injection, contextual framing, policy
+  puppetry, protected-effect execution, and indirect prompt injection.
 
-Each rendered instance has a content hash and a fixed suite label. Repeated
-static trials rotate through distinct frozen templates instead of paraphrasing
-after seeing defense results. This measures fixed-library coverage, not
-population ASR.
+Each applicable target/family set contains six unique payloads. The records live
+in three target-specific TOML files and carry a stable definition ID, upstream
+source/version/license, delivery channel, contamination label, validation
+status, exact success definition, and content hash. The runner rejects a request
+that would wrap around and repeat a payload.
+
+RAG indirect attacks are inserted as untrusted retrieved documents while the
+user message remains benign. Coding indirect attacks are inserted as untrusted
+repository context. This measures the actual indirect channel instead of
+mislabeling an ordinary user prompt.
+
+This remains fixed-library coverage, not population ASR. Garak and Promptfoo
+source patterns are pinned and locally adapted; hosted payload generation and
+model-graded oracles are not called during a census.
+
+The first temperature-0 exploratory transfer run produced 0/36 exact Chatbot
+recoveries on GPT-OSS, 1/42 RAG recoveries on GPT-OSS, 2/30 Coding protected
+effects on GPT-OSS, and 17/36 exact Chatbot recoveries on Llama 3.3 70B. The
+immutable run IDs and family breakdown are in
+[`docs/STATIC_ATTACK_CORPUS_REPORT.md`](docs/STATIC_ATTACK_CORPUS_REPORT.md).
 
 ### Adaptive D6 reconstruction v1
 
@@ -147,8 +168,8 @@ target output and delivery status. The orchestrator—not the policy—owns the
 secret, exact oracle, provider calls, and hard budgets.
 
 The portfolio implementations are a strong experimental harness, not evidence
-that any named attack has a particular ASR. No paid live-provider campaign was
-run automatically. The next evidence step is a frozen transfer bank,
+that any adaptive attack has a particular ASR. No paid adaptive live-provider
+campaign was run. The next evidence step is a frozen transfer bank,
 blind-mutation control under matched budget, and preregistered cross-provider
 campaigns.
 
@@ -206,7 +227,7 @@ The UI now provides:
 - multi-target matrix planning with explicit N/A cells;
 - executable-defense filtering;
 - provider/model selection and in-memory keys;
-- static paired pilot;
+- static paired census with one to six unique payloads per family;
 - durable manual multi-turn lab history with resume, close, and delete;
 - paired D6, Crescendo, PAIR, and TAP adaptive experiments;
 - explicit attacker provider/model selection for PAIR and TAP;
@@ -218,20 +239,24 @@ The UI now provides:
 
 ## Validation evidence
 
-Completed on 2026-07-25:
+Completed on 2026-07-26:
 
 - Ruff: passed.
-- Pytest: 141 passed.
+- Pytest: 151 passed.
 - Next.js production build: passed TypeScript, compilation, and static page
   generation.
 - Actual API server: health endpoint returned 200.
 - Actual web server: root returned 200.
 - Next.js API rewrite: catalog and benchmark requests returned 200.
-- Catalog smoke result: three targets, three providers, seven attacks, seven
+- Catalog smoke result: three targets, three providers, 12 attacks, seven
   executable defense variants, and 15 registered defense columns.
 - End-to-end fake-provider acceptance:
   - all three baseline applications succeeded under a synthetic vulnerable
     response;
+  - RAG indirect injection traveled through retrieved context while the user
+    query remained benign;
+  - Unicode code-point and JSON character-array disclosures were reconstructed
+    exactly, with no fuzzy credit;
   - each target-specific defense stopped its paired attack;
   - adaptive D6 reconstructed and exactly submitted against baseline;
   - transformation-aware output control stopped the paired adaptive arm;

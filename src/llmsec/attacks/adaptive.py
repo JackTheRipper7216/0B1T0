@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
-from typing import TypeAlias
 
 
 class ResponseSignal(StrEnum):
@@ -49,7 +48,7 @@ class Stop:
     verified_success: bool = False
 
 
-AttackAction: TypeAlias = SendMessage | SubmitCandidate | Stop
+type AttackAction = SendMessage | SubmitCandidate | Stop
 
 
 @dataclass(frozen=True, slots=True)

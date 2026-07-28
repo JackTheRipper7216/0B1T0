@@ -3,7 +3,6 @@ from llmsec.defenses.registry import resolve_defense_column
 from llmsec.infrastructure.providers import FakeModelGateway
 from llmsec.targets import ChatbotTarget
 
-
 SECRET = "FLAG{s0me_secret_in_the_system_prompt}"
 
 

@@ -4,7 +4,6 @@ import secrets
 import unicodedata
 from dataclasses import dataclass
 
-
 CHATBOT_FLAG = "FLAG{s0me_secret_in_the_system_prompt}"
 
 
