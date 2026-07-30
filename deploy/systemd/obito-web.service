@@ -1,0 +1,18 @@
+[Unit]
+Description=0B1T0 Next.js service
+After=network-online.target obito-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=obito
+WorkingDirectory=/home/obito/0B1T0
+Environment=NODE_ENV=production
+Environment=API_ORIGIN=http://127.0.0.1:8000
+Environment=PATH=/home/obito/.local/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/home/obito/.local/node/bin/npm --workspace @obito/web run start -- --hostname 0.0.0.0 --port 1337
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

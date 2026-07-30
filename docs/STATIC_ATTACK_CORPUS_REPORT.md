@@ -83,7 +83,7 @@ PYTHONPATH=src:. .venv/bin/python scripts/run_static_corpus.py \
   --provider groq \
   --model openai/gpt-oss-120b \
   --env-file .env \
-  --payloads 6 \
+  --sample-payloads 6 \
   --temperature 0
 ```
 

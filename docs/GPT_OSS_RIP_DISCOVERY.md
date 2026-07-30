@@ -102,6 +102,12 @@ The correct next step is:
 5. test transfer to another GPT-OSS deployment and to GPT/Claude targets without
    editing the payload from their responses.
 
+Implementation status (2026-07-29): steps 1–3 are now represented by preserving
+the historical v2 report and freezing the verified payload plus three untuned
+transfer variants in `static_corpus_v3`. The Matrix Builder's full-corpus mode
+runs these records against baseline and every selected applicable defense.
+Cross-provider transfer remains to be measured.
+
 ## Harness changes
 
 The exploratory runner at `scripts/run_chatbot_exploration.py` now provides:

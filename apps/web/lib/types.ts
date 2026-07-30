@@ -78,6 +78,12 @@ export interface Catalog {
   postponed_targets: string[];
 }
 
+export interface AuthSession {
+  username: string;
+  role: "admin";
+  access_token: string;
+}
+
 export interface MatrixEstimate {
   target_count: number;
   attack_count: number;
@@ -181,6 +187,7 @@ export interface LabSession {
   model_id: string;
   temperature: number;
   defense_column_id: string;
+  owner_username: string;
   created_at: string;
   updated_at: string;
   turn_count: number;

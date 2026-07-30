@@ -22,12 +22,10 @@ def test_static_census_is_versioned_distinct_and_hashable() -> None:
     assert all(instance.source_reference for instance in instances)
 
 
-def test_static_corpus_has_equal_sized_families_and_no_secret_contamination() -> None:
-    assert len(STATIC_ATTACK_DEFINITIONS) == 108
-    assert {
-        get_static_attack_count("direct_prompt_injection", target_id)
-        for target_id in ("chatbot", "rag", "coding")
-    } == {12}
+def test_static_corpus_has_complete_families_and_no_secret_contamination() -> None:
+    assert len(STATIC_ATTACK_DEFINITIONS) == 40
+    assert get_static_attack_count("direct_prompt_injection", "chatbot") == 12
+    assert get_static_attack_count("contextual_framing", "chatbot") == 16
     serialized = "\n".join(
         definition.prompt_template + definition.context_template
         for definition in STATIC_ATTACK_DEFINITIONS
@@ -36,18 +34,21 @@ def test_static_corpus_has_equal_sized_families_and_no_secret_contamination() ->
     assert "gsk_" not in serialized
 
 
+def test_verified_gpt_oss_role_in_prompt_is_in_confirmatory_corpus() -> None:
+    instance = get_static_attack_instance("contextual_framing", "chatbot", 12)
+
+    assert instance.definition_id == "chatbot.puppetry.rip_angle_verified"
+    assert instance.validation_status == "documented_local_exact_success_9_of_9"
+    assert "~assistantchannelfinal〈" in instance.payload
+
+
 def test_static_census_rejects_repeated_payload_index() -> None:
     with pytest.raises(ValueError, match="would repeat"):
         get_static_attack_instance("direct_prompt_injection", "chatbot", 12)
 
 
-def test_indirect_attack_is_restricted_to_applicable_targets() -> None:
-    instance = get_static_attack_instance(
-        "indirect_prompt_injection",
-        "rag",
-    )
-    assert instance.delivery == "retrieved_document"
-    assert "restricted incident" in instance.context_payload
-    assert "Summarize" in instance.payload
+def test_indirect_attack_is_removed_from_active_chatbot_corpus() -> None:
     with pytest.raises(ValueError, match="no executable"):
         get_static_attack_instance("indirect_prompt_injection", "chatbot")
+    with pytest.raises(ValueError, match="no executable"):
+        get_static_attack_instance("indirect_prompt_injection", "rag")

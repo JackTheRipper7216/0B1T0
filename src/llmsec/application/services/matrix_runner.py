@@ -42,6 +42,22 @@ from llmsec.targets import build_target
 MAX_STATIC_ARMS = 384
 
 
+def _payload_count(request: MatrixRunRequest, attack_id: str) -> int:
+    if request.corpus_mode == "full":
+        return get_static_attack_count(attack_id, request.target_id)
+    return request.trials
+
+
+def _static_arm_count(
+    request: MatrixRunRequest,
+    column_ids: list[str],
+) -> int:
+    payloads_per_model = sum(
+        _payload_count(request, attack_id) for attack_id in request.attack_ids
+    )
+    return payloads_per_model * len(request.model_ids) * len(column_ids)
+
+
 def validate_static_matrix_request(request: MatrixRunRequest) -> list[str]:
     _reject_duplicates("attack", request.attack_ids)
     _reject_duplicates("model", request.model_ids)
@@ -62,7 +78,7 @@ def validate_static_matrix_request(request: MatrixRunRequest) -> list[str]:
             )
         render_static_attack(attack_id, request.target_id)
         payload_count = get_static_attack_count(attack_id, request.target_id)
-        if request.trials > payload_count:
+        if request.corpus_mode == "sample" and request.trials > payload_count:
             raise ValueError(
                 f"Attack {attack_id!r} has {payload_count} unique payloads for "
                 f"{request.target_id!r}; request at most {payload_count} to avoid repeats"
@@ -90,12 +106,7 @@ def validate_static_matrix_request(request: MatrixRunRequest) -> list[str]:
         if model_id not in {model.id for model in provider.models}:
             raise ValueError(f"Model reference {model_ref!r} is not registered")
 
-    arm_count = (
-        len(request.attack_ids)
-        * len(request.model_ids)
-        * len(column_ids)
-        * request.trials
-    )
+    arm_count = _static_arm_count(request, column_ids)
     if arm_count > MAX_STATIC_ARMS:
         raise ValueError(
             f"Static census would execute {arm_count} arms; the safety limit is "
@@ -119,12 +130,7 @@ async def run_static_matrix(
     started_at = datetime.now(UTC)
     run_id = uuid4()
     trials: list[MatrixRunTrialResponse] = []
-    arm_count = (
-        len(request.attack_ids)
-        * len(request.model_ids)
-        * len(column_ids)
-        * request.trials
-    )
+    arm_count = _static_arm_count(request, column_ids)
     budget = CampaignBudget(
         str(run_id),
         BudgetLimits(
@@ -184,7 +190,7 @@ async def _execute_static_trials(
         provider_id, model_id = parse_model_ref(model_ref)
         gateway = gateways[provider_id]
         for attack_id in request.attack_ids:
-            for trial_index in range(1, request.trials + 1):
+            for trial_index in range(1, _payload_count(request, attack_id) + 1):
                 instance = get_static_attack_instance(
                     attack_id,
                     request.target_id,

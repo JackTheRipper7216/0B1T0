@@ -12,7 +12,7 @@ Handler and Tool Agent remain explicitly postponed.
 
 - Groq Chat Completions, OpenAI Responses, and Anthropic Messages gateways
 - Current Groq GPT-OSS, OpenAI GPT-5.6, and Anthropic Claude model catalog
-- Paired static attack census with 108 versioned, source-attributed,
+- Paired static attack census with 112 versioned, source-attributed,
   content-hashed payload records
 - Visible-only, budgeted D6, Crescendo, PAIR, and TAP adaptive policies
 - Separately selected and accounted attacker models for PAIR and TAP
@@ -32,7 +32,9 @@ package names, and source code use `OBITO`.
 
 The static attack files are intentionally easy to inspect and extend:
 
-- [`chatbot.toml`](src/llmsec/attacks/corpus/chatbot.toml) — 36 records;
+- [`chatbot.toml`](src/llmsec/attacks/corpus/chatbot.toml) — 40 records,
+  including the confirmed GPT-OSS role-in-prompt payload and three frozen
+  transfer variants;
 - [`rag.toml`](src/llmsec/attacks/corpus/rag.toml) — 42 records, including
   true retrieved-document delivery;
 - [`coding.toml`](src/llmsec/attacks/corpus/coding.toml) — 30 records,

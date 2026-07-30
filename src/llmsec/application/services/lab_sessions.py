@@ -24,6 +24,7 @@ class LabTurn:
 @dataclass(slots=True)
 class LabSession:
     id: UUID
+    owner_username: str
     target_id: str
     provider_id: str
     model_id: str
@@ -89,6 +90,7 @@ class LabSessionStore:
         self,
         *,
         target_id: str,
+        owner_username: str = "Ben10",
         provider_id: str,
         model_id: str,
         temperature: float,
@@ -97,6 +99,7 @@ class LabSessionStore:
         now = datetime.now(UTC)
         session = LabSession(
             id=uuid4(),
+            owner_username=owner_username,
             target_id=target_id,
             provider_id=provider_id,
             model_id=model_id,
@@ -110,12 +113,13 @@ class LabSessionStore:
             connection.execute(
                 """
                 INSERT INTO lab_sessions (
-                    session_id, target_id, provider_id, model_id, temperature,
+                    session_id, owner_username, target_id, provider_id, model_id, temperature,
                     defense_column_id, secret, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(session.id),
+                    session.owner_username,
                     session.target_id,
                     session.provider_id,
                     session.model_id,
@@ -131,15 +135,19 @@ class LabSessionStore:
             session.turn_lock = self._turn_locks.setdefault(session.id, asyncio.Lock())
         return session
 
-    def get(self, session_id: UUID) -> LabSession | None:
+    def get(self, session_id: UUID, owner_username: str | None = None) -> LabSession | None:
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (str(session_id), owner_username) if owner_username is not None else (str(session_id),)
+            )
             row = connection.execute(
-                """
-                SELECT session_id, target_id, provider_id, model_id, temperature,
+                f"""
+                SELECT session_id, owner_username, target_id, provider_id, model_id, temperature,
                        defense_column_id, secret, status, created_at, updated_at
-                FROM lab_sessions WHERE session_id = ?
+                FROM lab_sessions WHERE session_id = ? {owner_clause}
                 """,
-                (str(session_id),),
+                params,
             ).fetchone()
             if row is None:
                 return None
@@ -154,15 +162,19 @@ class LabSessionStore:
             session.turn_lock = self._turn_locks.setdefault(session.id, asyncio.Lock())
             return session
 
-    def list(self, limit: int = 100) -> list[LabSession]:
+    def list(self, limit: int = 100, owner_username: str | None = None) -> list[LabSession]:
         with self._lock, self._connect() as connection:
+            where_clause = "WHERE owner_username = ?" if owner_username is not None else ""
+            params: tuple[object, ...] = (
+                (owner_username, limit) if owner_username is not None else (limit,)
+            )
             rows = connection.execute(
-                """
-                SELECT session_id, target_id, provider_id, model_id, temperature,
+                f"""
+                SELECT session_id, owner_username, target_id, provider_id, model_id, temperature,
                        defense_column_id, secret, status, created_at, updated_at
-                FROM lab_sessions ORDER BY updated_at DESC LIMIT ?
+                FROM lab_sessions {where_clause} ORDER BY updated_at DESC LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
             sessions = []
             for row in rows:
@@ -184,14 +196,19 @@ class LabSessionStore:
         self,
         session_id: UUID,
         *,
+        owner_username: str | None = None,
         user_input: str,
         result: dict[str, Any],
     ) -> LabSession | None:
         now = datetime.now(UTC)
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (str(session_id), owner_username) if owner_username is not None else (str(session_id),)
+            )
             row = connection.execute(
-                "SELECT status FROM lab_sessions WHERE session_id = ?",
-                (str(session_id),),
+                f"SELECT status FROM lab_sessions WHERE session_id = ? {owner_clause}",
+                params,
             ).fetchone()
             if row is None:
                 return None
@@ -217,50 +234,78 @@ class LabSessionStore:
                 ),
             )
             status = "success" if bool(stored_result["visible_exact_leak"]) else str(row[0])
-            connection.execute(
-                """
-                UPDATE lab_sessions SET status = ?, updated_at = ?
-                WHERE session_id = ?
-                """,
-                (status, now.isoformat(), str(session_id)),
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params = (
+                (status, now.isoformat(), str(session_id), owner_username)
+                if owner_username is not None
+                else (status, now.isoformat(), str(session_id))
             )
-        return self.get(session_id)
+            connection.execute(
+                f"""
+                UPDATE lab_sessions SET status = ?, updated_at = ?
+                WHERE session_id = ? {owner_clause}
+                """,
+                params,
+            )
+        return self.get(session_id, owner_username)
 
-    def mark_submission(self, session_id: UUID, *, success: bool) -> bool:
+    def mark_submission(
+        self,
+        session_id: UUID,
+        *,
+        owner_username: str | None = None,
+        success: bool,
+    ) -> bool:
         if not success:
-            return self.get(session_id) is not None
+            return self.get(session_id, owner_username) is not None
         now = datetime.now(UTC).isoformat()
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (now, str(session_id), owner_username)
+                if owner_username is not None
+                else (now, str(session_id))
+            )
             cursor = connection.execute(
-                """
+                f"""
                 UPDATE lab_sessions SET status = 'success', updated_at = ?
-                WHERE session_id = ?
+                WHERE session_id = ? {owner_clause}
                 """,
-                (now, str(session_id)),
+                params,
             )
             return cursor.rowcount > 0
 
-    def close(self, session_id: UUID) -> LabSession | None:
+    def close(self, session_id: UUID, owner_username: str | None = None) -> LabSession | None:
         now = datetime.now(UTC).isoformat()
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (now, str(session_id), owner_username)
+                if owner_username is not None
+                else (now, str(session_id))
+            )
             cursor = connection.execute(
-                """
+                f"""
                 UPDATE lab_sessions
                 SET status = CASE WHEN status = 'success' THEN status ELSE 'failed' END,
                     updated_at = ?
-                WHERE session_id = ?
+                WHERE session_id = ? {owner_clause}
                 """,
-                (now, str(session_id)),
+                params,
             )
             if cursor.rowcount == 0:
                 return None
-        return self.get(session_id)
+        return self.get(session_id, owner_username)
 
-    def delete(self, session_id: UUID) -> bool:
+    def delete(self, session_id: UUID, owner_username: str | None = None) -> bool:
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (str(session_id), owner_username) if owner_username is not None else (str(session_id),)
+            )
             cursor = connection.execute(
-                "DELETE FROM lab_sessions WHERE session_id = ?",
-                (str(session_id),),
+                f"DELETE FROM lab_sessions WHERE session_id = ? {owner_clause}",
+                params,
             )
             deleted = cursor.rowcount > 0
             if deleted:
@@ -284,6 +329,7 @@ class LabSessionStore:
                 """
                 CREATE TABLE IF NOT EXISTS lab_sessions (
                     session_id TEXT PRIMARY KEY,
+                    owner_username TEXT NOT NULL DEFAULT 'Ben10',
                     target_id TEXT NOT NULL,
                     provider_id TEXT NOT NULL,
                     model_id TEXT NOT NULL,
@@ -295,6 +341,12 @@ class LabSessionStore:
                     updated_at TEXT NOT NULL
                 )
                 """
+            )
+            _ensure_column(
+                connection,
+                "lab_sessions",
+                "owner_username",
+                "TEXT NOT NULL DEFAULT 'Ben10'",
             )
             connection.execute(
                 """
@@ -346,14 +398,29 @@ def _row_to_session(
     ]
     return LabSession(
         id=UUID(str(row[0])),
-        target_id=str(row[1]),
-        provider_id=str(row[2]),
-        model_id=str(row[3]),
-        temperature=float(row[4]),
-        defense_column_id=str(row[5]),
-        secret=str(row[6]),
-        status=str(row[7]),
-        created_at=datetime.fromisoformat(str(row[8])),
-        updated_at=datetime.fromisoformat(str(row[9])),
+        owner_username=str(row[1]),
+        target_id=str(row[2]),
+        provider_id=str(row[3]),
+        model_id=str(row[4]),
+        temperature=float(row[5]),
+        defense_column_id=str(row[6]),
+        secret=str(row[7]),
+        status=str(row[8]),
+        created_at=datetime.fromisoformat(str(row[9])),
+        updated_at=datetime.fromisoformat(str(row[10])),
         turns=turns,
     )
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")

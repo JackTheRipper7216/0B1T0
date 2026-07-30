@@ -31,7 +31,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--provider", choices=tuple(PROVIDERS_BY_ID), default="groq")
     parser.add_argument("--model", default="openai/gpt-oss-120b")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--payloads", type=int, choices=range(1, 7), default=6)
+    parser.add_argument(
+        "--sample-payloads",
+        type=int,
+        choices=range(1, 31),
+        default=None,
+        help="Run a bounded per-class sample instead of the complete corpus.",
+    )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
         "--request-spacing",
@@ -139,7 +145,8 @@ async def run(args: argparse.Namespace) -> list[dict[str, object]]:
             attack_ids=static_families(target_id),
             model_ids=[f"{args.provider}:{args.model}"],
             defense_column_ids=args.defenses or ["baseline"],
-            trials=args.payloads,
+            corpus_mode="sample" if args.sample_payloads else "full",
+            trials=args.sample_payloads or 1,
             temperature=args.temperature,
             max_wall_time_seconds=3_600,
         )
@@ -152,7 +159,7 @@ async def run(args: argparse.Namespace) -> list[dict[str, object]]:
                 "target": target_id,
                 "status": result.status,
                 "families": len(request.attack_ids),
-                "payloads_per_family": request.trials,
+                "corpus_mode": request.corpus_mode,
                 "arms": result.total_arms,
                 "successes": successes,
                 "asr_percent": (

@@ -3,9 +3,10 @@ import io
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from apps.api.auth import AuthenticatedUser, require_current_user
 from llmsec.infrastructure.run_archive import ArchivedRun, RunArchive
 from llmsec.schemas import ArchivedRunDetailResponse, ArchivedRunSummaryResponse
 
@@ -14,21 +15,30 @@ run_archive = RunArchive()
 
 
 @router.get("/runs", response_model=list[ArchivedRunSummaryResponse])
-def list_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[ArchivedRunSummaryResponse]:
-    return [_summary(record) for record in run_archive.list(limit)]
+def list_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> list[ArchivedRunSummaryResponse]:
+    return [_summary(record) for record in run_archive.list(limit, user.username)]
 
 
 @router.get("/runs/{run_id}", response_model=ArchivedRunDetailResponse)
-def get_run(run_id: UUID) -> ArchivedRunDetailResponse:
-    record = run_archive.get(str(run_id))
+def get_run(
+    run_id: UUID,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> ArchivedRunDetailResponse:
+    record = run_archive.get(str(run_id), user.username)
     if record is None:
         raise HTTPException(status_code=404, detail="Archived run not found")
     return _detail(record)
 
 
 @router.delete("/runs/{run_id}", status_code=204)
-def delete_run(run_id: UUID) -> Response:
-    if not run_archive.delete(str(run_id)):
+def delete_run(
+    run_id: UUID,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> Response:
+    if not run_archive.delete(str(run_id), user.username):
         raise HTTPException(status_code=404, detail="Archived run not found")
     return Response(status_code=204)
 
@@ -37,8 +47,9 @@ def delete_run(run_id: UUID) -> Response:
 def export_run(
     run_id: UUID,
     format: str = Query(default="json", pattern="^(json|csv)$"),
+    user: AuthenticatedUser = Depends(require_current_user),
 ) -> Response:
-    record = run_archive.get(str(run_id))
+    record = run_archive.get(str(run_id), user.username)
     if record is None:
         raise HTTPException(status_code=404, detail="Archived run not found")
     if format == "json":

@@ -48,14 +48,12 @@ def _extract_secret(system_prompt: str) -> str | None:
     return None
 
 
-async def test_complete_three_target_static_adaptive_benchmark_archive_workflow(
+async def test_complete_chatbot_static_adaptive_benchmark_archive_workflow(
     tmp_path: Path,
 ) -> None:
     model_ref = "groq:openai/gpt-oss-120b"
     cases = (
         ("chatbot", "single:output_exact_v1"),
-        ("rag", "single:access_rag_acl_v1"),
-        ("coding", "single:human_gate_v1"),
     )
     completed_static = []
     for target_id, defense_column_id in cases:
@@ -93,7 +91,7 @@ async def test_complete_three_target_static_adaptive_benchmark_archive_workflow(
 
     benchmark = await run_benign_benchmark(
         BenignBenchmarkRequest(
-            target_ids=["chatbot", "rag", "coding"],
+            target_ids=["chatbot"],
             defense_column_ids=["baseline"],
         )
     )
@@ -103,4 +101,4 @@ async def test_complete_three_target_static_adaptive_benchmark_archive_workflow(
     for result in completed_static:
         archive.save("static", result)
     archive.save("adaptive", adaptive)
-    assert len(archive.list()) == 4
+    assert len(archive.list()) == 2

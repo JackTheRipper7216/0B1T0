@@ -5,14 +5,15 @@ attack census.
 
 | Target | File | Static families | Records | Indirect delivery |
 |---|---|---:|---:|---|
-| Chatbot | `chatbot.toml` | 6 | 36 | No |
+| Chatbot | `chatbot.toml` | 6 | 40 | No |
 | RAG Assistant | `rag.toml` | 7 | 42 | Retrieved document |
 | Coding Assistant | `coding.toml` | 5 | 30 | Repository context |
-| **Total** |  | **18 target/family sets** | **108** |  |
+| **Total** |  | **18 target/family sets** | **112** |  |
 
-Every applicable target/family set contains six unique records. A matrix run
-therefore accepts one through six payloads per selected family and never wraps
-around to repeat a prompt.
+Every applicable target/family set contains at least six unique records.
+`corpus_mode = "full"` executes every record in each selected public attack
+class; sample mode remains available to scripts and API clients for bounded
+diagnostics and never wraps around to repeat a prompt.
 
 ## Record contract
 
@@ -44,8 +45,8 @@ loader rejects the fixed Chatbot flag and Groq-style key literals.
 3. Keep its definition ID unique and its secret-independent prompt deterministic.
 4. For RAG or Coding indirect injection, put the malicious instructions in
    `context`; keep `prompt` as the benign user task.
-5. Keep every target/family set the same size or update the UI and census
-   policy deliberately.
+5. Full-corpus runs support different class sizes. Keep at least six records in
+   every internal family so public classes retain a meaningful minimum bank.
 6. Run:
 
    ```bash

@@ -91,6 +91,17 @@ class CatalogResponse(BaseModel):
     postponed_targets: list[str]
 
 
+class AuthLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: SecretStr
+
+
+class AuthSessionResponse(BaseModel):
+    username: str
+    role: Literal["admin"]
+    access_token: str
+
+
 class MatrixEstimateRequest(BaseModel):
     target_ids: list[TargetId] = Field(min_length=1)
     attack_ids: list[str] = Field(min_length=1)
@@ -125,6 +136,7 @@ class MatrixRunRequest(BaseModel):
     attack_ids: list[str] = Field(min_length=1)
     model_ids: list[str] = Field(min_length=1)
     defense_column_ids: list[str] = Field(min_length=1)
+    corpus_mode: Literal["sample", "full"] = "sample"
     trials: int = Field(default=1, ge=1, le=30)
     temperature: float = Field(default=0.0, ge=0, le=1)
     max_total_input_tokens: int = Field(default=2_000_000, ge=1, le=100_000_000)
@@ -375,6 +387,7 @@ class LabSessionResponse(BaseModel):
     model_id: str
     temperature: float
     defense_column_id: str
+    owner_username: str
     created_at: datetime
     updated_at: datetime
     turn_count: int

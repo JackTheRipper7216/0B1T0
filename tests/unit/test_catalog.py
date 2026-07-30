@@ -5,16 +5,12 @@ from apps.api.main import app
 client = TestClient(app)
 
 
-def test_catalog_exposes_three_targets_and_postpones_pii_and_agent() -> None:
+def test_catalog_exposes_chatbot_only_and_postpones_removed_targets() -> None:
     response = client.get("/api/v1/catalog")
     assert response.status_code == 200
     payload = response.json()
-    assert [target["id"] for target in payload["targets"]] == [
-        "chatbot",
-        "rag",
-        "coding",
-    ]
-    assert payload["postponed_targets"] == ["pii", "tool_agent"]
+    assert [target["id"] for target in payload["targets"]] == ["chatbot"]
+    assert payload["postponed_targets"] == ["rag", "coding", "pii", "tool_agent"]
 
 
 def test_catalog_has_three_distinct_providers() -> None:
@@ -40,9 +36,7 @@ def test_catalog_marks_only_the_validated_core_as_executable() -> None:
         if defense["implementation_status"] == "executable"
     }
     assert executable == {
-        "access_rag_acl_v1",
         "hardening_rule_v1",
-        "human_gate_v1",
         "input_regex_v1",
         "output_exact_v1",
         "output_fuzzy_legacy_v1",
@@ -56,16 +50,10 @@ def test_catalog_exposes_target_specific_static_payload_counts() -> None:
 
     assert attacks["direct_prompt_injection"]["payload_counts"] == {
         "chatbot": 12,
-        "rag": 12,
-        "coding": 12,
     }
-    assert attacks["indirect_prompt_injection"]["payload_counts"] == {
-        "rag": 6,
-        "coding": 6,
-    }
+    assert attacks["contextual_framing"]["payload_counts"]["chatbot"] == 16
     assert [attack["id"] for attack in payload["attacks"]] == [
         "direct_prompt_injection",
-        "indirect_prompt_injection",
         "contextual_framing",
         "decomposition_reconstruction",
         "encoding_evasion",
@@ -88,8 +76,6 @@ def test_catalog_exposes_only_the_five_named_defenses_and_d6() -> None:
         ("single:hardening_rule_v1", "Prompt hardening"),
         ("single:input_regex_v1", "Input filter"),
         ("single:output_recovery_v1", "Output filter"),
-        ("single:access_rag_acl_v1", "Access control"),
-        ("single:human_gate_v1", "Human-in-the-loop"),
         ("combo:d6_legacy", "D6 stack"),
     ]
 

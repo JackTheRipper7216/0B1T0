@@ -1,0 +1,14 @@
+[Unit]
+Description=Temporary Cloudflare tunnel for the 0B1T0 supervisor demo
+After=network-online.target obito-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=obito
+ExecStart=/home/obito/.local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --url http://127.0.0.1:1337
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

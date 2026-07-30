@@ -38,6 +38,17 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .boot-card p, .boot-card small { color: var(--muted); }
 .boot-card code { display: block; margin: 18px 0 12px; padding: 12px; border-radius: 8px; color: #b7dbff; background: var(--surface-2); }
 
+.login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 0%, #102b47 0, var(--canvas) 42%); }
+.login-panel { width: min(430px, 100%); display: grid; gap: 18px; padding: 32px; border: 1px solid var(--line); border-radius: 14px; background: rgba(12,34,56,.94); box-shadow: 0 24px 80px rgba(0,5,14,.36); }
+.login-brand { margin-bottom: 2px; }
+.login-panel h1 { margin: 0; font-size: 34px; letter-spacing: -.05em; }
+.login-panel p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.login-panel label { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.login-panel input { height: 43px; padding: 0 12px; border: 1px solid #31506d; border-radius: 8px; color: var(--text); background: #091d30; outline: none; }
+.login-panel input:focus { border-color: var(--accent); }
+.login-panel button { height: 43px; border: 0; border-radius: 8px; color: #061525; background: var(--accent); font-size: 10px; font-weight: 900; }
+.login-error { color: #ffb3b3; }
+
 .app-shell { min-height: 100vh; }
 .sidebar {
   position: fixed;
@@ -54,6 +65,11 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .brand div { display: grid; }
 .brand strong { font-size: 17px; letter-spacing: -.03em; }
 .brand span:last-child { color: var(--muted); font-size: 10px; }
+.account-card { display: grid; gap: 5px; margin: -18px 0 26px; padding: 12px; border: 1px solid #17314a; border-radius: 8px; background: rgba(255,255,255,.025); }
+.account-card span { color: var(--subtle); font-size: 8px; text-transform: uppercase; }
+.account-card strong { font-size: 13px; }
+.account-card button { justify-self: start; padding: 4px 0; border: 0; color: #9bd0ff; background: transparent; font-size: 9px; font-weight: 800; }
+.account-card button:hover { color: #c7e6ff; text-decoration: underline; }
 .side-block { padding: 21px 0; border-top: 1px solid #17314a; }
 .side-block:first-of-type { padding-top: 0; border-top: 0; }
 .side-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -329,7 +345,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .archive-detail > header > div:first-child { display: flex; align-items: center; gap: 9px; }
 .archive-detail h3 { margin: 0; }
 .archive-actions { display: flex; gap: 7px; }
-.archive-actions a { color: #9bd0ff; border: 1px solid var(--line); border-radius: 5px; padding: 6px 9px; text-decoration: none; font-weight: 700; }
+.archive-actions a, .archive-actions button { color: #9bd0ff; border: 1px solid var(--line); border-radius: 5px; background: transparent; padding: 6px 9px; text-decoration: none; font-weight: 700; }
 .archive-detail-stats { display: flex; gap: 8px; margin-bottom: 12px; }
 .archive-detail-stats span { color: var(--muted); background: #0b243d; border-radius: 6px; padding: 7px 9px; }
 .archive-detail-stats strong { color: var(--text); }

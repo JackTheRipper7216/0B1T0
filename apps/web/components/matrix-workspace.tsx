@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   checkCredential,
@@ -9,21 +9,26 @@ import {
   deleteArchivedRun,
   deleteLabSession,
   estimateMatrix,
+  exportArchivedRun,
   fetchArchivedRun,
   fetchCatalog,
+  fetchCurrentUser,
   fetchLabSession,
   fetchLabSessions,
   fetchRunArchive,
+  login,
   runAdaptiveMatrix,
   runBenignBenchmark,
   runStaticMatrix,
   sendLabMessage,
+  setApiAuthToken,
   submitLabCandidate,
 } from "@/lib/api";
 import type {
   AdaptiveRun,
   ArchivedRunDetail,
   ArchivedRunSummary,
+  AuthSession,
   BenignBenchmark,
   Catalog,
   CredentialCheck,
@@ -41,11 +46,19 @@ function toggleValue<T>(items: T[], value: T): T[] {
 }
 
 export function MatrixWorkspace() {
+  const [auth, setAuth] = useState<AuthSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [activeView, setActiveView] = useState<"matrix" | "attack-lab" | "runs">("matrix");
   const [targets, setTargets] = useState<TargetId[]>(["chatbot"]);
-  const [attacks, setAttacks] = useState<string[]>(["direct_prompt_injection", "contextual_framing"]);
+  const [attacks, setAttacks] = useState<string[]>([
+    "direct_prompt_injection",
+    "indirect_prompt_injection",
+    "contextual_framing",
+    "decomposition_reconstruction",
+    "encoding_evasion",
+  ]);
   const [providers, setProviders] = useState<ProviderId[]>(["groq"]);
   const [labProvider, setLabProvider] = useState<ProviderId>("groq");
   const [models, setModels] = useState<Record<ProviderId, string>>({
@@ -63,7 +76,6 @@ export function MatrixWorkspace() {
     "single:output_recovery_v1",
     "combo:d6_legacy",
   ]);
-  const [trials, setTrials] = useState(3);
   const [maxTurns, setMaxTurns] = useState(6);
   const [temperature, setTemperature] = useState(0);
   const [estimate, setEstimate] = useState<MatrixEstimate | null>(null);
@@ -78,6 +90,29 @@ export function MatrixWorkspace() {
   const [runningBenchmark, setRunningBenchmark] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const storedToken = window.localStorage.getItem("obito_access_token");
+    if (!storedToken) {
+      setAuthChecked(true);
+      return () => controller.abort();
+    }
+    setApiAuthToken(storedToken);
+    fetchCurrentUser(controller.signal)
+      .then((payload) => {
+        setAuth({ ...payload, access_token: storedToken });
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        window.localStorage.removeItem("obito_access_token");
+        setApiAuthToken(null);
+        setAuth(null);
+        setAuthChecked(true);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!auth) return;
     const controller = new AbortController();
     fetchCatalog(controller.signal)
       .then((payload) => {
@@ -96,16 +131,26 @@ export function MatrixWorkspace() {
         if (error.name !== "AbortError") setCatalogError(error.message);
       });
     return () => controller.abort();
-  }, []);
+  }, [auth]);
 
   const modelIds = providers.map((providerId) => `${providerId}:${models[providerId]}`);
   const temperatureUnsupported = providers.some((providerId) => {
     const provider = catalog?.providers.find((item) => item.id === providerId);
     return provider?.models.find((model) => model.id === models[providerId])?.temperature_supported === false;
   });
+  const selectedApplicableAttackIds = useMemo(
+    () => catalog?.attacks
+      .filter((attack) => (
+        attacks.includes(attack.id)
+        && attack.implementation_status === "executable"
+        && attack.applicable_target_ids.some((targetId) => targets.includes(targetId))
+      ))
+      .map((attack) => attack.id) ?? [],
+    [catalog, attacks, targets],
+  );
 
   useEffect(() => {
-    if (!catalog || !targets.length || !attacks.length || !modelIds.length) {
+    if (!catalog || !targets.length || !selectedApplicableAttackIds.length || !modelIds.length) {
       setEstimate(null);
       return;
     }
@@ -114,10 +159,10 @@ export function MatrixWorkspace() {
       estimateMatrix(
         {
           target_ids: targets,
-          attack_ids: attacks,
+          attack_ids: selectedApplicableAttackIds,
           model_ids: modelIds,
           defense_column_ids: columns,
-          trials,
+          trials: 1,
           max_turns: maxTurns,
         },
         controller.signal,
@@ -134,7 +179,7 @@ export function MatrixWorkspace() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [catalog, targets, attacks, providers, models, columns, trials, maxTurns]);
+  }, [catalog, targets, providers, models, columns, maxTurns, selectedApplicableAttackIds]);
 
   useEffect(() => {
     if (activeView !== "runs") return;
@@ -194,19 +239,19 @@ export function MatrixWorkspace() {
       : [],
     [catalog, columns, targets],
   );
-  const staticPayloadCapacity = useMemo(
-    () => targets.length === 1 && executableStaticAttacks.length
-      ? Math.min(...executableStaticAttacks.map(
-        (attack) => attack.payload_counts[targets[0]] ?? 0,
-      ))
+  const staticPayloadCount = useMemo(
+    () => targets.length === 1
+      ? executableStaticAttacks.reduce(
+        (total, attack) => total + (attack.payload_counts[targets[0]] ?? 0),
+        0,
+      )
       : 0,
     [executableStaticAttacks, targets],
   );
   const staticPlannedArms = targets.length === 1
-    ? executableStaticAttacks.length
+    ? staticPayloadCount
       * modelIds.length
       * new Set(["baseline", ...staticColumnIds]).size
-      * trials
     : 0;
   const benchmarkColumnIds = useMemo(
     () => columns.filter((columnId) => {
@@ -219,20 +264,14 @@ export function MatrixWorkspace() {
     [catalog, columns, targets],
   );
 
-  const staticPilotReady = targets.length === 1
+  const staticCorpusReady = targets.length === 1
     && executableStaticAttacks.length > 0
-    && trials >= 1
-    && trials <= staticPayloadCapacity
+    && staticPayloadCount > 0
+    && staticPlannedArms <= 384
     && providers.every((providerId) => {
       const provider = catalog?.providers.find((item) => item.id === providerId);
       return Boolean(credentials[providerId]) || Boolean(provider?.configured_from_env);
     });
-
-  useEffect(() => {
-    if (staticPayloadCapacity > 0 && trials > staticPayloadCapacity) {
-      setTrials(staticPayloadCapacity);
-    }
-  }, [staticPayloadCapacity, trials]);
 
   function toggleTarget(targetId: TargetId) {
     if (targets.includes(targetId) && targets.length === 1) return;
@@ -278,8 +317,8 @@ export function MatrixWorkspace() {
     }
   }
 
-  async function runStaticPilot() {
-    if (!staticPilotReady || runningMatrix) return;
+  async function runFullStaticCorpus() {
+    if (!staticCorpusReady || runningMatrix) return;
     setRunningMatrix(true);
     setMatrixRunError("");
     try {
@@ -288,7 +327,7 @@ export function MatrixWorkspace() {
         attack_ids: executableStaticAttacks.map((attack) => attack.id),
         model_ids: modelIds,
         defense_column_ids: staticColumnIds,
-        trials,
+        corpus_mode: "full",
         temperature,
         credentials: Object.fromEntries(
           providers
@@ -322,6 +361,31 @@ export function MatrixWorkspace() {
     }
   }
 
+  async function handleLogin(username: string, password: string) {
+    const session = await login(username, password);
+    window.localStorage.setItem("obito_access_token", session.access_token);
+    setApiAuthToken(session.access_token);
+    setAuth(session);
+    setCatalog(null);
+  }
+
+  function handleLogout() {
+    window.localStorage.removeItem("obito_access_token");
+    setApiAuthToken(null);
+    setAuth(null);
+    setCatalog(null);
+    setArchivedRuns([]);
+    setMatrixRun(null);
+  }
+
+  if (!authChecked) {
+    return <main className="boot-state"><div className="loader" aria-label="Checking session" /></main>;
+  }
+
+  if (!auth) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   if (catalogError) {
     return (
       <main className="boot-state">
@@ -347,6 +411,11 @@ export function MatrixWorkspace() {
           <span className="brand-mark" aria-label="0B1T0">0B1T0</span>
           <div><strong>OBITO</strong><span>LLM security benchmark</span></div>
         </div>
+        <div className="account-card">
+          <span>Admin account</span>
+          <strong>{auth.username}</strong>
+          <button onClick={handleLogout}>Sign out</button>
+        </div>
 
         <div className="side-block">
           <div className="side-heading"><span>Applications</span><small>{targets.length} selected</small></div>
@@ -362,12 +431,11 @@ export function MatrixWorkspace() {
               </button>
             ))}
           </div>
-          <div className="postponed-note">Tool Agent is postponed and excluded from this build.</div>
+          <div className="postponed-note">Chatbot-only build. RAG and Coding are removed from this evaluation surface.</div>
         </div>
 
         <div className="side-block compact-fields">
           <div className="side-heading"><span>Run controls</span></div>
-          <label>Static payloads per attack class<input type="number" min="1" max={Math.max(1, staticPayloadCapacity || 6)} value={trials} onChange={(event) => setTrials(Number(event.target.value))} /></label>
           <label>Adaptive maximum turns<input type="number" min="1" max="50" value={maxTurns} onChange={(event) => setMaxTurns(Number(event.target.value))} /></label>
           <label>Temperature<div className="range-line"><input type="range" min="0" max="1" step="0.1" value={temperature} onChange={(event) => setTemperature(Number(event.target.value))} /><span>{temperature.toFixed(1)}</span></div>{temperatureUnsupported && <small>Omitted for selected Claude models</small>}</label>
         </div>
@@ -377,7 +445,7 @@ export function MatrixWorkspace() {
 
       <main className="main-area">
         <header className="workspace-head">
-          <div><span className="overline">Research workspace</span><h1>Defense Matrix</h1><p>Run every attack against baseline, individual defenses and selected logical stacks.</p></div>
+          <div><span className="overline">Research workspace</span><h1>Chatbot Defense Matrix</h1><p>Run Chatbot attacks against baseline, individual defenses and selected logical stacks.</p></div>
           <div className="head-stat"><strong>{catalog.metrics.length}</strong><span>metrics per cell</span></div>
         </header>
 
@@ -417,7 +485,7 @@ export function MatrixWorkspace() {
             </section>
 
             <section className="builder-section">
-              <div className="section-title"><span>02</span><div><h2>Static attack classes</h2><p>The application supplies the objective; each selected class becomes a matrix row.</p></div></div>
+              <div className="section-title"><span>02</span><div><h2>Static attack classes</h2><p>The Chatbot supplies the objective; each selected class becomes a matrix row.</p></div></div>
               <div className="option-grid attacks-grid">
                 {applicableAttacks.map((attack) => (
                   <button className={`option-button ${attacks.includes(attack.id) ? "selected" : ""}`} disabled={attack.implementation_status !== "executable"} key={attack.id} onClick={() => setAttacks(toggleValue(attacks, attack.id))}>
@@ -508,14 +576,14 @@ export function MatrixWorkspace() {
             <section className="launch-bar">
               <div className="launch-estimate">
                 <div><strong>{estimate?.matrix_cells ?? "—"}</strong><span>matrix cells</span></div>
-                <div><strong>{estimate?.trial_arms ?? "—"}</strong><span>configured arms</span></div>
+                <div><strong>{staticPayloadCount || "—"}</strong><span>corpus payloads</span></div>
                 <div><strong>{staticPlannedArms || "—"}</strong><span>static census calls</span></div>
                 {!!estimate?.skipped_inapplicable_cells && <div><strong>{estimate.skipped_inapplicable_cells}</strong><span>N/A cells skipped</span></div>}
               </div>
               <div className="launch-action">
                 {(estimateError || matrixRunError) && <small>{estimateError || matrixRunError}</small>}
-                {!staticPilotReady && !estimateError && !matrixRunError && <small>Select one application, at least one applicable static attack, and provide every selected provider key.</small>}
-                <button disabled={!estimate || !staticPilotReady || runningMatrix} onClick={() => void runStaticPilot()}>{runningMatrix ? "Running static census…" : `Run ${trials}-payload paired census`} <span>→</span></button>
+                {!staticCorpusReady && !estimateError && !matrixRunError && <small>{staticPlannedArms > 384 ? "This selection exceeds the 384-call safety limit; use one model or fewer defense columns." : "Select one application, at least one applicable static attack, and provide every selected provider key."}</small>}
+                <button disabled={!estimate || !staticCorpusReady || runningMatrix} onClick={() => void runFullStaticCorpus()}>{runningMatrix ? "Running full static corpus…" : `Run full static corpus (${staticPayloadCount})`} <span>→</span></button>
               </div>
             </section>
 
@@ -588,6 +656,47 @@ export function MatrixWorkspace() {
   );
 }
 
+function LoginScreen({ onLogin }: { onLogin: (username: string, password: string) => Promise<void> }) {
+  const [username, setUsername] = useState("Ben10");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!username.trim() || !password || submitting) return;
+    setSubmitting(true);
+    setLoginError("");
+    try {
+      await onLogin(username.trim(), password);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Sign in failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <form className="login-panel" onSubmit={(event) => void submit(event)}>
+        <div className="brand login-brand">
+          <span className="brand-mark" aria-label="0B1T0">0B1T0</span>
+          <div><strong>OBITO</strong><span>Chatbot security benchmark</span></div>
+        </div>
+        <div>
+          <span className="overline">Admin access</span>
+          <h1>Sign in</h1>
+          <p>Access the Chatbot attack lab, static matrix, and archived experiment history.</p>
+        </div>
+        <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
+        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+        {loginError && <small className="login-error">{loginError}</small>}
+        <button disabled={submitting || !username.trim() || !password}>{submitting ? "Signing in..." : "Sign in"}</button>
+      </form>
+    </main>
+  );
+}
+
 function RunArchive({
   runs,
   error,
@@ -601,6 +710,7 @@ function RunArchive({
   const [selected, setSelected] = useState<ArchivedRunDetail | null>(null);
   const [loadingId, setLoadingId] = useState("");
   const [detailError, setDetailError] = useState("");
+  const [exporting, setExporting] = useState("");
 
   useEffect(() => setVisibleRuns(runs), [runs]);
 
@@ -625,6 +735,24 @@ function RunArchive({
       if (selected?.run_id === runId) setSelected(null);
     } catch (deleteError) {
       setDetailError(deleteError instanceof Error ? deleteError.message : "Could not delete run");
+    }
+  }
+
+  async function download(runId: string, format: "csv" | "json") {
+    setExporting(`${runId}:${format}`);
+    setDetailError("");
+    try {
+      const blob = await exportArchivedRun(runId, format);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${runId}.${format}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setDetailError(exportError instanceof Error ? exportError.message : "Could not export run");
+    } finally {
+      setExporting("");
     }
   }
 
@@ -655,7 +783,7 @@ function RunArchive({
         <div className="archive-detail">
           {!selected ? <div className="empty-transcript"><span>↗</span><h3>Select a run</h3><p>Inspect its immutable result and export it for analysis.</p></div> : (
             <>
-              <header><div><span className="archive-kind">{selected.kind}</span><h3>{selected.run_id.slice(0, 12)}</h3></div><div className="archive-actions"><button className="delete-label" onClick={() => void remove(selected.run_id)}>Delete</button><a href={`/api/v1/runs/${selected.run_id}/export?format=csv`}>CSV</a><a href={`/api/v1/runs/${selected.run_id}/export?format=json`}>JSON</a></div></header>
+              <header><div><span className="archive-kind">{selected.kind}</span><h3>{selected.run_id.slice(0, 12)}</h3></div><div className="archive-actions"><button className="delete-label" onClick={() => void remove(selected.run_id)}>Delete</button><button disabled={exporting === `${selected.run_id}:csv`} onClick={() => void download(selected.run_id, "csv")}>CSV</button><button disabled={exporting === `${selected.run_id}:json`} onClick={() => void download(selected.run_id, "json")}>JSON</button></div></header>
               <div className="archive-detail-stats"><span><strong>{selected.success_count}</strong> successful</span><span><strong>{selected.total_units}</strong> units</span><span><strong>{selected.target_id}</strong> target</span></div>
               <ArchivedRunTranscript run={selected} catalog={catalog} />
             </>
@@ -987,7 +1115,7 @@ function AttackLab({
               <div className="empty-transcript">
                 <span>01</span>
                 <h3>Start a controlled session</h3>
-                <p>The Chatbot uses the original fixed synthetic flag; other targets use generated synthetic values. Only attacker-visible output appears here.</p>
+                <p>The Chatbot uses the original fixed synthetic flag. Only attacker-visible output appears here.</p>
                 <small>Oracle: {target.oracle}</small>
               </div>
             ) : (

@@ -1,8 +1,9 @@
 import os
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
+from apps.api.auth import AuthenticatedUser, require_current_user
 from llmsec.application.services import LabSession, LabSessionStore
 from llmsec.catalog import DEFENSE_COLUMNS_BY_ID, PROVIDERS_BY_ID, TARGETS_BY_ID
 from llmsec.defenses.registry import resolve_defense_column
@@ -29,20 +30,27 @@ session_store = LabSessionStore()
 @router.get("/lab/sessions", response_model=list[LabSessionResponse])
 def list_lab_sessions(
     limit: int = Query(default=100, ge=1, le=200),
+    user: AuthenticatedUser = Depends(require_current_user),
 ) -> list[LabSessionResponse]:
-    return [_session_response(session) for session in session_store.list(limit)]
+    return [_session_response(session) for session in session_store.list(limit, user.username)]
 
 
 @router.get("/lab/sessions/{session_id}", response_model=LabSessionDetailResponse)
-def get_lab_session(session_id: UUID) -> LabSessionDetailResponse:
-    session = session_store.get(session_id)
+def get_lab_session(
+    session_id: UUID,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> LabSessionDetailResponse:
+    session = session_store.get(session_id, user.username)
     if session is None:
         raise HTTPException(status_code=404, detail="Attack Lab session not found")
     return _session_detail_response(session)
 
 
 @router.post("/lab/sessions", response_model=LabSessionResponse, status_code=201)
-def create_lab_session(request: LabSessionCreateRequest) -> LabSessionResponse:
+def create_lab_session(
+    request: LabSessionCreateRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> LabSessionResponse:
     if request.provider_id not in EXECUTABLE_PROVIDER_IDS:
         raise HTTPException(
             status_code=409,
@@ -68,6 +76,7 @@ def create_lab_session(request: LabSessionCreateRequest) -> LabSessionResponse:
 
     session = session_store.create(
         target_id=request.target_id,
+        owner_username=user.username,
         provider_id=request.provider_id,
         model_id=request.model_id,
         temperature=request.temperature,
@@ -77,8 +86,12 @@ def create_lab_session(request: LabSessionCreateRequest) -> LabSessionResponse:
 
 
 @router.post("/lab/sessions/{session_id}/messages", response_model=LabMessageResponse)
-async def send_lab_message(session_id: UUID, request: LabMessageRequest) -> LabMessageResponse:
-    session = session_store.get(session_id)
+async def send_lab_message(
+    session_id: UUID,
+    request: LabMessageRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> LabMessageResponse:
+    session = session_store.get(session_id, user.username)
     if session is None:
         raise HTTPException(status_code=404, detail="Attack Lab session not found")
     if session.target_id not in TARGETS_BY_ID:
@@ -147,6 +160,7 @@ async def send_lab_message(session_id: UUID, request: LabMessageRequest) -> LabM
         )
         session_store.record_turn(
             session_id,
+            owner_username=user.username,
             user_input=request.content,
             result=response.model_dump(mode="json"),
         )
@@ -154,14 +168,18 @@ async def send_lab_message(session_id: UUID, request: LabMessageRequest) -> LabM
 
 
 @router.post("/lab/sessions/{session_id}/submit", response_model=LabSubmitResponse)
-def submit_lab_candidate(session_id: UUID, request: LabSubmitRequest) -> LabSubmitResponse:
-    session = session_store.get(session_id)
+def submit_lab_candidate(
+    session_id: UUID,
+    request: LabSubmitRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> LabSubmitResponse:
+    session = session_store.get(session_id, user.username)
     if session is None:
         raise HTTPException(status_code=404, detail="Attack Lab session not found")
     if session.status == "failed":
         raise HTTPException(status_code=409, detail="This Attack Lab session has ended")
     success = session.oracle.exact_submission(request.candidate.get_secret_value())
-    session_store.mark_submission(session_id, success=success)
+    session_store.mark_submission(session_id, owner_username=user.username, success=success)
     return LabSubmitResponse(
         success=success, classification="exact_leak" if success else "incorrect"
     )
@@ -171,16 +189,22 @@ def submit_lab_candidate(session_id: UUID, request: LabSubmitRequest) -> LabSubm
     "/lab/sessions/{session_id}/close",
     response_model=LabSessionResponse,
 )
-def close_lab_session(session_id: UUID) -> LabSessionResponse:
-    session = session_store.close(session_id)
+def close_lab_session(
+    session_id: UUID,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> LabSessionResponse:
+    session = session_store.close(session_id, user.username)
     if session is None:
         raise HTTPException(status_code=404, detail="Attack Lab session not found")
     return _session_response(session)
 
 
 @router.delete("/lab/sessions/{session_id}", status_code=204)
-def delete_lab_session(session_id: UUID) -> Response:
-    if not session_store.delete(session_id):
+def delete_lab_session(
+    session_id: UUID,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> Response:
+    if not session_store.delete(session_id, user.username):
         raise HTTPException(status_code=404, detail="Attack Lab session not found")
     return Response(status_code=204)
 
@@ -193,6 +217,7 @@ def _session_response(session: LabSession) -> LabSessionResponse:
         model_id=session.model_id,
         temperature=session.temperature,
         defense_column_id=session.defense_column_id,
+        owner_username=session.owner_username,
         created_at=session.created_at,
         updated_at=session.updated_at,
         turn_count=session.turn_count,

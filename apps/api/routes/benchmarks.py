@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from apps.api.auth import AuthenticatedUser, require_current_user
 from llmsec.benchmarks import run_benign_benchmark
 from llmsec.catalog import DEFENSE_COLUMNS_BY_ID
 from llmsec.defenses import resolve_defense_column
@@ -11,6 +12,7 @@ router = APIRouter(tags=["benchmarks"])
 @router.post("/benchmarks/benign", response_model=BenignBenchmarkResponse)
 async def run_benign_preflight(
     request: BenignBenchmarkRequest,
+    _user: AuthenticatedUser = Depends(require_current_user),
 ) -> BenignBenchmarkResponse:
     try:
         for column_id in request.defense_column_ids:

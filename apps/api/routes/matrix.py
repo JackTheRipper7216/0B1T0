@@ -1,7 +1,8 @@
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from apps.api.auth import AuthenticatedUser, require_current_user
 from apps.api.routes.runs import run_archive
 from llmsec.application.ports import ModelGateway
 from llmsec.application.services import (
@@ -27,7 +28,10 @@ router = APIRouter(tags=["matrix"])
 
 
 @router.post("/matrix/estimate", response_model=MatrixEstimateResponse)
-def get_matrix_estimate(request: MatrixEstimateRequest) -> MatrixEstimateResponse:
+def get_matrix_estimate(
+    request: MatrixEstimateRequest,
+    _user: AuthenticatedUser = Depends(require_current_user),
+) -> MatrixEstimateResponse:
     try:
         return estimate_matrix(request)
     except ValueError as exc:
@@ -35,12 +39,15 @@ def get_matrix_estimate(request: MatrixEstimateRequest) -> MatrixEstimateRespons
 
 
 @router.post("/matrix/run-static", response_model=MatrixRunResponse)
-async def run_matrix_static(request: MatrixRunRequest) -> MatrixRunResponse:
+async def run_matrix_static(
+    request: MatrixRunRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> MatrixRunResponse:
     try:
         validate_static_matrix_request(request)
         gateways = _build_gateways(request)
         result = await run_static_matrix(request, gateways)
-        run_archive.save("static", result)
+        run_archive.save("static", result, owner_username=user.username)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -49,12 +56,15 @@ async def run_matrix_static(request: MatrixRunRequest) -> MatrixRunResponse:
 
 
 @router.post("/matrix/run-adaptive", response_model=AdaptiveRunResponse)
-async def run_matrix_adaptive(request: AdaptiveRunRequest) -> AdaptiveRunResponse:
+async def run_matrix_adaptive(
+    request: AdaptiveRunRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> AdaptiveRunResponse:
     try:
         validate_adaptive_request(request)
         gateways = _build_gateways(request)
         result = await run_adaptive_matrix(request, gateways)
-        run_archive.save("adaptive", result)
+        run_archive.save("adaptive", result, owner_username=user.username)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

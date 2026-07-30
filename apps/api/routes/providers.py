@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from apps.api.auth import AuthenticatedUser, require_current_user
 from llmsec.catalog import PROVIDERS_BY_ID
 from llmsec.schemas import CredentialCheckRequest, CredentialCheckResponse
 
@@ -13,6 +14,7 @@ router = APIRouter(tags=["providers"])
 def check_credential(
     provider_id: str,
     request: CredentialCheckRequest,
+    _user: AuthenticatedUser = Depends(require_current_user),
 ) -> CredentialCheckResponse:
     provider = PROVIDERS_BY_ID.get(provider_id)
     if provider is None:

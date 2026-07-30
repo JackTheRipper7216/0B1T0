@@ -13,6 +13,7 @@ from pydantic import BaseModel
 @dataclass(frozen=True, slots=True)
 class ArchivedRun:
     run_id: str
+    owner_username: str
     kind: str
     target_id: str
     status: str
@@ -46,11 +47,18 @@ class RunArchive:
         except OSError:
             pass
 
-    def save(self, kind: str, result: BaseModel) -> ArchivedRun:
+    def save(
+        self,
+        kind: str,
+        result: BaseModel,
+        *,
+        owner_username: str = "Ben10",
+    ) -> ArchivedRun:
         payload = result.model_dump(mode="json")
         success_count, total_units = _counts(kind, payload)
         record = ArchivedRun(
             run_id=str(payload["run_id"]),
+            owner_username=owner_username,
             kind=kind,
             target_id=str(payload["target_id"]),
             status=str(payload["status"]),
@@ -64,12 +72,13 @@ class RunArchive:
             connection.execute(
                 """
                 INSERT OR REPLACE INTO runs (
-                    run_id, kind, target_id, status, started_at, completed_at,
+                    run_id, owner_username, kind, target_id, status, started_at, completed_at,
                     success_count, total_units, result_json, archived_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.run_id,
+                    record.owner_username,
                     record.kind,
                     record.target_id,
                     record.status,
@@ -83,33 +92,48 @@ class RunArchive:
             )
         return record
 
-    def list(self, limit: int = 50) -> list[ArchivedRun]:
+    def list(self, limit: int = 50, owner_username: str | None = None) -> list[ArchivedRun]:
         with self._lock, self._connect() as connection:
+            where_clause = "WHERE owner_username = ?" if owner_username is not None else ""
+            params: tuple[object, ...] = (
+                (owner_username, limit) if owner_username is not None else (limit,)
+            )
             rows = connection.execute(
-                """
-                SELECT run_id, kind, target_id, status, started_at, completed_at,
+                f"""
+                SELECT run_id, owner_username, kind, target_id, status, started_at, completed_at,
                        success_count, total_units, result_json
-                FROM runs ORDER BY completed_at DESC LIMIT ?
+                FROM runs {where_clause} ORDER BY completed_at DESC LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
         return [_row_to_record(row) for row in rows]
 
-    def get(self, run_id: str) -> ArchivedRun | None:
+    def get(self, run_id: str, owner_username: str | None = None) -> ArchivedRun | None:
         with self._lock, self._connect() as connection:
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (run_id, owner_username) if owner_username is not None else (run_id,)
+            )
             row = connection.execute(
-                """
-                SELECT run_id, kind, target_id, status, started_at, completed_at,
+                f"""
+                SELECT run_id, owner_username, kind, target_id, status, started_at, completed_at,
                        success_count, total_units, result_json
-                FROM runs WHERE run_id = ?
+                FROM runs WHERE run_id = ? {owner_clause}
                 """,
-                (run_id,),
+                params,
             ).fetchone()
         return _row_to_record(row) if row is not None else None
 
-    def delete(self, run_id: str) -> bool:
+    def delete(self, run_id: str, owner_username: str | None = None) -> bool:
         with self._lock, self._connect() as connection:
-            cursor = connection.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+            owner_clause = "AND owner_username = ?" if owner_username is not None else ""
+            params: tuple[str, ...] = (
+                (run_id, owner_username) if owner_username is not None else (run_id,)
+            )
+            cursor = connection.execute(
+                f"DELETE FROM runs WHERE run_id = ? {owner_clause}",
+                params,
+            )
             return cursor.rowcount > 0
 
     def _connect(self) -> sqlite3.Connection:
@@ -124,6 +148,7 @@ class RunArchive:
                 """
                 CREATE TABLE IF NOT EXISTS runs (
                     run_id TEXT PRIMARY KEY,
+                    owner_username TEXT NOT NULL DEFAULT 'Ben10',
                     kind TEXT NOT NULL,
                     target_id TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -135,6 +160,12 @@ class RunArchive:
                     archived_at TEXT NOT NULL
                 )
                 """
+            )
+            _ensure_column(
+                connection,
+                "runs",
+                "owner_username",
+                "TEXT NOT NULL DEFAULT 'Ben10'",
             )
 
 
@@ -148,12 +179,27 @@ def _counts(kind: str, payload: dict[str, Any]) -> tuple[int, int]:
 def _row_to_record(row: sqlite3.Row | tuple[Any, ...]) -> ArchivedRun:
     return ArchivedRun(
         run_id=str(row[0]),
-        kind=str(row[1]),
-        target_id=str(row[2]),
-        status=str(row[3]),
-        started_at=str(row[4]),
-        completed_at=str(row[5]),
-        success_count=int(row[6]),
-        total_units=int(row[7]),
-        result=json.loads(str(row[8])),
+        owner_username=str(row[1]),
+        kind=str(row[2]),
+        target_id=str(row[3]),
+        status=str(row[4]),
+        started_at=str(row[5]),
+        completed_at=str(row[6]),
+        success_count=int(row[7]),
+        total_units=int(row[8]),
+        result=json.loads(str(row[9])),
     )
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
