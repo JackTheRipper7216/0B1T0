@@ -10,8 +10,12 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "OBITO — LLM Security Benchmark",
+  applicationName: "0B1T0",
+  title: "0B1T0 — LLM Security Benchmark",
   description: "Orchestrated Benchmark for Injection Testing and Oracles",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
