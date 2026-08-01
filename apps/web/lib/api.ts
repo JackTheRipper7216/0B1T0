@@ -44,6 +44,15 @@ export async function login(username: string, password: string): Promise<AuthSes
   return parseResponse<AuthSession>(response);
 }
 
+export async function signup(username: string, password: string): Promise<AuthSession> {
+  const response = await fetch("/api/v1/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  return parseResponse<AuthSession>(response);
+}
+
 export async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthSession> {
   const response = await fetch("/api/v1/auth/me", {
     signal,
@@ -63,7 +72,7 @@ export async function fetchCatalog(signal?: AbortSignal): Promise<Catalog> {
 }
 
 export async function fetchRunArchive(signal?: AbortSignal): Promise<ArchivedRunSummary[]> {
-  const response = await fetch("/api/v1/runs", {
+  const response = await fetch("/api/v1/runs?limit=200", {
     signal,
     cache: "no-store",
     headers: apiHeaders(),

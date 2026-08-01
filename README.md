@@ -1,9 +1,9 @@
 # OBITO — LLM Security Benchmark
 
 **OBITO** stands for **Orchestrated Benchmark for Injection Testing and
-Oracles**. It is a local, single-researcher web testbed for measuring prompt attacks
-against deliberately vulnerable LLM applications. It compares the same attack
-instance against baseline, individual defenses, and selected defense stacks.
+Oracles**. It is a local web testbed for measuring prompt attacks against
+deliberately vulnerable LLM applications. It compares the same attack instance
+against baseline, individual defenses, and selected defense stacks.
 
 The active applications are Chatbot, RAG Assistant, and Coding Assistant. PII
 Handler and Tool Agent remain explicitly postponed.
@@ -26,6 +26,7 @@ Handler and Tool Agent remain explicitly postponed.
 - Deterministic benign FPR/utility preflight that uses no provider API calls
 - Durable SQLite run archive with chat transcripts plus JSON and CSV exports
 - Durable multi-turn Attack Lab history with resume and delete controls
+- Durable sign-up and sign-in accounts with account-isolated run and Attack Lab history
 
 The interface uses the leetspeak wordmark `0B1T0`; papers, documentation,
 package names, and source code use `OBITO`.
@@ -63,6 +64,18 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 ```
 
+Configure the administrator and a private token-signing secret:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
+
+```dotenv
+OBITO_AUTH_SECRET=<generated value>
+OBITO_ADMIN_USERNAME=Ben10
+OBITO_ADMIN_PASSWORD=<your administrator password>
+```
+
 Browser-entered keys stay in React memory and are sent only to the local API
 for that request. Keys are not written to the run archive, browser storage, or
 API responses. Keep both services bound to loopback.
@@ -83,12 +96,19 @@ The production web build bakes `API_ORIGIN` into its rewrite. The default is
 `http://127.0.0.1:8000`; set `API_ORIGIN` when running `npm run build:web` if
 the API will use a different address.
 
-Completed runs and Attack Lab conversations are stored at
-`.obito/runs.sqlite3`. Existing installations automatically continue using a
-legacy `.aegis/runs.sqlite3` archive when present, so prior history is not lost.
-The database contains synthetic attack transcripts and
-the target secret required to resume a lab session. It may therefore contain
-the fixed Chatbot flag or a generated target secret. Treat it as research data.
+Accounts, completed runs, and Attack Lab conversations are stored at
+`.obito/runs.sqlite3`. A new user can select **Create account** on the
+authentication screen; signing up also signs that user in. Usernames are unique
+without regard to letter case, passwords are stored as salted scrypt hashes, and
+the Runs and Attack Lab APIs scope every list, detail, update, export, and delete
+operation to the authenticated account.
+
+Existing installations automatically continue using a legacy
+`.aegis/runs.sqlite3` archive when present, so prior history is not lost. Legacy
+history remains owned by the original `Ben10` administrator account. The
+database contains synthetic attack transcripts and the target secret required
+to resume a lab session. It may therefore contain the fixed Chatbot flag or a
+generated target secret. Treat it as research data.
 
 ## Verification
 

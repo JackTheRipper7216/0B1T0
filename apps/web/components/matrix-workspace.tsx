@@ -22,6 +22,7 @@ import {
   runStaticMatrix,
   sendLabMessage,
   setApiAuthToken,
+  signup,
   submitLabCandidate,
 } from "@/lib/api";
 import type {
@@ -43,6 +44,21 @@ import type {
 
 function toggleValue<T>(items: T[], value: T): T[] {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value];
+}
+
+function isMatrixRun(value: unknown): value is MatrixRun {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<MatrixRun>;
+  return typeof candidate.run_id === "string"
+    && typeof candidate.target_id === "string"
+    && typeof candidate.total_arms === "number"
+    && Array.isArray(candidate.cells)
+    && Array.isArray(candidate.trials)
+    && Boolean(candidate.budget && typeof candidate.budget === "object");
+}
+
+function archivedMatrixRun(run: ArchivedRunDetail): MatrixRun | null {
+  return run.kind === "static" && isMatrixRun(run.result) ? run.result : null;
 }
 
 export function MatrixWorkspace() {
@@ -82,6 +98,7 @@ export function MatrixWorkspace() {
   const [estimateError, setEstimateError] = useState("");
   const [notice, setNotice] = useState("");
   const [matrixRun, setMatrixRun] = useState<MatrixRun | null>(null);
+  const [matrixRunSource, setMatrixRunSource] = useState<"live" | "archive">("live");
   const [runningMatrix, setRunningMatrix] = useState(false);
   const [matrixRunError, setMatrixRunError] = useState("");
   const [archivedRuns, setArchivedRuns] = useState<ArchivedRunSummary[]>([]);
@@ -182,18 +199,35 @@ export function MatrixWorkspace() {
   }, [catalog, targets, providers, models, columns, maxTurns, selectedApplicableAttackIds]);
 
   useEffect(() => {
-    if (activeView !== "runs") return;
+    if (!auth) return;
     const controller = new AbortController();
     fetchRunArchive(controller.signal)
       .then((runs) => {
         setArchivedRuns(runs);
         setArchiveError("");
+        const latestStatic = runs.find((run) => run.kind === "static");
+        if (!latestStatic) return;
+        void fetchArchivedRun(latestStatic.run_id)
+          .then((detail) => {
+            if (controller.signal.aborted) return;
+            const restored = archivedMatrixRun(detail);
+            if (restored) {
+              setMatrixRun(restored);
+              setMatrixRunSource("archive");
+            }
+          })
+          .catch((error: Error) => {
+            if (!controller.signal.aborted) setMatrixRunError(`Could not restore saved matrix: ${error.message}`);
+          });
       })
       .catch((error: Error) => {
-        if (error.name !== "AbortError") setArchiveError(error.message);
+        if (error.name !== "AbortError") {
+          setArchiveError(error.message);
+          setMatrixRunError(`Could not restore saved matrix: ${error.message}`);
+        }
       });
     return () => controller.abort();
-  }, [activeView]);
+  }, [auth]);
 
   const applicableAttacks = useMemo(
     () => catalog?.attacks.filter((attack) => attack.applicable_target_ids.some((id) => targets.includes(id))) ?? [],
@@ -336,6 +370,13 @@ export function MatrixWorkspace() {
         ),
       });
       setMatrixRun(result);
+      setMatrixRunSource("live");
+      void fetchRunArchive()
+        .then((runs) => {
+          setArchivedRuns(runs);
+          setArchiveError("");
+        })
+        .catch((error: Error) => setArchiveError(error.message));
       setNotice(`Static census completed: ${result.total_arms} paired arms.`);
       window.setTimeout(() => setNotice(""), 3600);
     } catch (error) {
@@ -363,6 +404,15 @@ export function MatrixWorkspace() {
 
   async function handleLogin(username: string, password: string) {
     const session = await login(username, password);
+    activateSession(session);
+  }
+
+  async function handleSignup(username: string, password: string) {
+    const session = await signup(username, password);
+    activateSession(session);
+  }
+
+  function activateSession(session: AuthSession) {
     window.localStorage.setItem("obito_access_token", session.access_token);
     setApiAuthToken(session.access_token);
     setAuth(session);
@@ -376,6 +426,7 @@ export function MatrixWorkspace() {
     setCatalog(null);
     setArchivedRuns([]);
     setMatrixRun(null);
+    setMatrixRunSource("live");
   }
 
   if (!authChecked) {
@@ -383,7 +434,7 @@ export function MatrixWorkspace() {
   }
 
   if (!auth) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLogin} onSignup={handleSignup} />;
   }
 
   if (catalogError) {
@@ -412,7 +463,7 @@ export function MatrixWorkspace() {
           <div><strong>OBITO</strong><span>LLM security benchmark</span></div>
         </div>
         <div className="account-card">
-          <span>Admin account</span>
+          <span>{auth.role === "admin" ? "Admin account" : "Researcher account"}</span>
           <strong>{auth.username}</strong>
           <button onClick={handleLogout}>Sign out</button>
         </div>
@@ -452,7 +503,7 @@ export function MatrixWorkspace() {
         <nav className="workspace-tabs">
           <button className={activeView === "matrix" ? "active" : ""} onClick={() => setActiveView("matrix")}>Matrix Builder</button>
           <button className={activeView === "attack-lab" ? "active" : ""} onClick={() => setActiveView("attack-lab")}>Attack Lab</button>
-          <button className={activeView === "runs" ? "active" : ""} onClick={() => setActiveView("runs")}>Run Archive</button>
+          <button className={activeView === "runs" ? "active" : ""} onClick={() => setActiveView("runs")}>Run History</button>
         </nav>
 
         {activeView === "matrix" ? (
@@ -588,9 +639,9 @@ export function MatrixWorkspace() {
             </section>
 
             {matrixRun && (
-              <section className="static-run-results">
+              <section className="static-run-results" id="static-run-results">
                 <header>
-                  <div><span className="overline">Latest {matrixRun.status.replace("_", " ")} census</span><h2>Static attack matrix</h2><p>Matched protected value, immutable corpus record, model, and payload index across every completed baseline–defense pair.</p></div>
+                  <div><span className="overline">{matrixRunSource === "archive" ? "Restored" : "Latest"} {matrixRun.status.replace("_", " ")} census</span><h2>Static attack matrix</h2><p>Matched protected value, immutable corpus record, model, and payload index across every completed baseline–defense pair.</p></div>
                   <div className="run-id"><span>Run</span><strong>{matrixRun.run_id.slice(0, 8)}</strong><small>{matrixRun.total_arms} arms · {matrixRun.budget.target_calls} calls</small></div>
                 </header>
                 <div className="static-results-table">
@@ -656,25 +707,54 @@ export function MatrixWorkspace() {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (username: string, password: string) => Promise<void> }) {
-  const [username, setUsername] = useState("Ben10");
+function LoginScreen({
+  onLogin,
+  onSignup,
+}: {
+  onLogin: (username: string, password: string) => Promise<void>;
+  onSignup: (username: string, password: string) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [loginError, setLoginError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!username.trim() || !password || submitting) return;
+    if (mode === "signup" && password !== passwordConfirmation) {
+      setLoginError("Passwords do not match");
+      return;
+    }
     setSubmitting(true);
     setLoginError("");
     try {
-      await onLogin(username.trim(), password);
+      if (mode === "signup") {
+        await onSignup(username.trim(), password);
+      } else {
+        await onLogin(username.trim(), password);
+      }
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : "Sign in failed");
+      setLoginError(error instanceof Error ? error.message : "Authentication failed");
     } finally {
       setSubmitting(false);
     }
   }
+
+  function switchMode(nextMode: "login" | "signup") {
+    setMode(nextMode);
+    setPassword("");
+    setPasswordConfirmation("");
+    setLoginError("");
+  }
+
+  const signupIncomplete = mode === "signup" && (
+    username.trim().length < 3
+    || password.length < 8
+    || password !== passwordConfirmation
+  );
 
   return (
     <main className="login-shell">
@@ -683,15 +763,81 @@ function LoginScreen({ onLogin }: { onLogin: (username: string, password: string
           <span className="brand-mark" aria-label="0B1T0">0B1T0</span>
           <div><strong>OBITO</strong><span>Chatbot security benchmark</span></div>
         </div>
-        <div>
-          <span className="overline">Admin access</span>
-          <h1>Sign in</h1>
-          <p>Access the Chatbot attack lab, static matrix, and archived experiment history.</p>
+        <div className="auth-mode-switch" aria-label="Authentication mode">
+          <button
+            className={mode === "login" ? "active" : ""}
+            type="button"
+            onClick={() => switchMode("login")}
+          >
+            Sign in
+          </button>
+          <button
+            className={mode === "signup" ? "active" : ""}
+            type="button"
+            onClick={() => switchMode("signup")}
+          >
+            Create account
+          </button>
         </div>
-        <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+        <div>
+          <span className="overline">{mode === "login" ? "Account access" : "New researcher"}</span>
+          <h1>{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <p>
+            {mode === "login"
+              ? "Access your attack lab sessions, static matrix, and private experiment history."
+              : "Your runs and Attack Lab conversations will be saved only to your account."}
+          </p>
+        </div>
+        <label>
+          Username
+          <input
+            value={username}
+            minLength={mode === "signup" ? 3 : 1}
+            maxLength={mode === "signup" ? 32 : 64}
+            pattern={mode === "signup" ? "[A-Za-z0-9][A-Za-z0-9_.-]{2,31}" : undefined}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            required
+          />
+          {mode === "signup" && <small>3–32 letters, numbers, dots, underscores, or hyphens</small>}
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            value={password}
+            minLength={mode === "signup" ? 8 : 1}
+            maxLength={128}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            required
+          />
+          {mode === "signup" && <small>Use at least 8 characters</small>}
+        </label>
+        {mode === "signup" && (
+          <label>
+            Confirm password
+            <input
+              type="password"
+              value={passwordConfirmation}
+              minLength={8}
+              maxLength={128}
+              onChange={(event) => setPasswordConfirmation(event.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </label>
+        )}
         {loginError && <small className="login-error">{loginError}</small>}
-        <button disabled={submitting || !username.trim() || !password}>{submitting ? "Signing in..." : "Sign in"}</button>
+        <button
+          className="auth-submit"
+          type="submit"
+          disabled={submitting || !username.trim() || !password || signupIncomplete}
+        >
+          {submitting
+            ? mode === "signup" ? "Creating account..." : "Signing in..."
+            : mode === "signup" ? "Create account" : "Sign in"}
+        </button>
       </form>
     </main>
   );
@@ -713,6 +859,28 @@ function RunArchive({
   const [exporting, setExporting] = useState("");
 
   useEffect(() => setVisibleRuns(runs), [runs]);
+
+  const runNumbers = useMemo(() => {
+    const chronological = [...visibleRuns].sort(
+      (left, right) => new Date(left.started_at).getTime() - new Date(right.started_at).getTime(),
+    );
+    const counters = { static: 0, adaptive: 0 };
+    return new Map(chronological.map((run) => {
+      counters[run.kind] += 1;
+      return [run.run_id, counters[run.kind]];
+    }));
+  }, [visibleRuns]);
+  const orderedRuns = useMemo(
+    () => [...visibleRuns].sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === "static" ? -1 : 1;
+      return new Date(right.started_at).getTime() - new Date(left.started_at).getTime();
+    }),
+    [visibleRuns],
+  );
+
+  function runLabel(run: ArchivedRunSummary): string {
+    return `${run.kind === "static" ? "Matrix" : "Adaptive"} ${runNumbers.get(run.run_id) ?? 1}`;
+  }
 
   async function inspect(runId: string) {
     setLoadingId(runId);
@@ -757,70 +925,175 @@ function RunArchive({
   }
 
   return (
-    <section className="run-archive">
+    <section className="run-archive matrix-history">
       <header className="archive-head">
-        <div><span className="overline">Durable local evidence</span><h2>Run Archive</h2><p>Completed static and adaptive experiments survive browser refreshes. Provider keys are never stored.</p></div>
+        <div><span className="overline">Saved to this account</span><h2>Run history</h2><p>Open a run, choose an attack × defense cell, and review its complete conversation history.</p></div>
         <strong>{visibleRuns.length} run{visibleRuns.length === 1 ? "" : "s"}</strong>
       </header>
       {(error || detailError) && <div className="archive-error">{error || detailError}</div>}
-      <div className="archive-layout">
-        <div className="archive-list">
-          {visibleRuns.length === 0 ? <div className="empty-history"><strong>No completed runs yet</strong><p>Run a static census or paired adaptive attack first.</p></div> : visibleRuns.map((run) => {
+      {visibleRuns.length === 0 ? (
+        <div className="empty-history"><strong>No saved runs yet</strong><p>Complete a static matrix or adaptive run and it will appear here.</p></div>
+      ) : (
+        <div className="matrix-run-cards">
+          {orderedRuns.map((run) => {
             const target = catalog.targets.find((item) => item.id === run.target_id);
+            const isSelected = selected?.run_id === run.run_id;
             return (
-              <div className={`archive-list-item ${selected?.run_id === run.run_id ? "selected" : ""}`} key={run.run_id}>
-                <button className="archive-open" onClick={() => void inspect(run.run_id)}>
-                  <span className={`archive-kind ${run.kind}`}>{run.kind}</span>
-                  <div><strong>{target?.name ?? run.target_id}</strong><small>{new Date(run.completed_at).toLocaleString()}</small></div>
-                  <div className="archive-score"><strong>{run.success_count}/{run.total_units}</strong><small>success</small></div>
-                  <span>{loadingId === run.run_id ? "…" : "›"}</span>
-                </button>
-                <button className="delete-label" onClick={() => void remove(run.run_id)}>Delete</button>
-              </div>
+              <button className={`matrix-run-card ${run.kind} ${isSelected ? "selected" : ""}`} key={run.run_id} onClick={() => void inspect(run.run_id)}>
+                <span className="matrix-run-icon" aria-hidden="true">{run.kind === "static" ? "▦" : "↗"}</span>
+                <span className="matrix-run-card-copy">
+                  <strong>{runLabel(run)}</strong>
+                  <small>{target?.name ?? run.target_id} · {new Date(run.completed_at).toLocaleString()}</small>
+                  <code>{run.run_id.slice(0, 8)}</code>
+                </span>
+                <span className="matrix-run-card-score"><strong>{run.success_count}/{run.total_units}</strong><small>successful</small></span>
+                <span className={`archive-status ${run.status}`}>{loadingId === run.run_id ? "loading" : run.status.replaceAll("_", " ")}</span>
+              </button>
             );
           })}
         </div>
-        <div className="archive-detail">
-          {!selected ? <div className="empty-transcript"><span>↗</span><h3>Select a run</h3><p>Inspect its immutable result and export it for analysis.</p></div> : (
-            <>
-              <header><div><span className="archive-kind">{selected.kind}</span><h3>{selected.run_id.slice(0, 12)}</h3></div><div className="archive-actions"><button className="delete-label" onClick={() => void remove(selected.run_id)}>Delete</button><button disabled={exporting === `${selected.run_id}:csv`} onClick={() => void download(selected.run_id, "csv")}>CSV</button><button disabled={exporting === `${selected.run_id}:json`} onClick={() => void download(selected.run_id, "json")}>JSON</button></div></header>
-              <div className="archive-detail-stats"><span><strong>{selected.success_count}</strong> successful</span><span><strong>{selected.total_units}</strong> units</span><span><strong>{selected.target_id}</strong> target</span></div>
-              <ArchivedRunTranscript run={selected} catalog={catalog} />
-            </>
-          )}
+      )}
+
+      {selected && (
+        <div className="archive-detail matrix-run-detail">
+          <header>
+            <div><span className={`archive-kind ${selected.kind}`}>{selected.kind}</span><div><h3>{runLabel(selected)}</h3><small>{new Date(selected.completed_at).toLocaleString()} · {selected.run_id}</small></div></div>
+            <div className="archive-actions">
+              <button disabled={exporting === `${selected.run_id}:csv`} onClick={() => void download(selected.run_id, "csv")}>CSV</button>
+              <button disabled={exporting === `${selected.run_id}:json`} onClick={() => void download(selected.run_id, "json")}>JSON</button>
+              <button className="delete-label" onClick={() => void remove(selected.run_id)}>Delete</button>
+            </div>
+          </header>
+          <ArchivedRunEvidence key={selected.run_id} run={selected} catalog={catalog} />
         </div>
-      </div>
+      )}
     </section>
   );
 }
 
-function ArchivedRunTranscript({ run, catalog }: { run: ArchivedRunDetail; catalog: Catalog }) {
-  if (run.kind === "static") {
-    const result = run.result as unknown as MatrixRun;
-    return (
-      <div className="archive-chat">
-        {result.trials.map((trial, index) => (
-          <section className="archive-conversation" key={`${trial.attack_instance_id}:${trial.defense_column_id}:${index}`}>
-            <header>
-              <strong>{catalog.defense_columns.find((column) => column.id === trial.defense_column_id)?.name ?? trial.defense_column_id}</strong>
-              <span className={`attempt-verdict ${trial.success ? "success" : "failed"}`}>{trial.success ? "Success" : "Failed"}</span>
-            </header>
-            <article className="lab-message user"><label>Attacker · {trial.attack_definition_name ?? trial.attack_id}</label><div>{trial.attack_input}</div></article>
-            {trial.attack_context && <article className="lab-message attacker-model"><label>Injected {trial.attack_delivery.replace("_", " ")}</label><div>{trial.attack_context}</div></article>}
-            <article className="lab-message assistant">
-              <label>Target · Payload {trial.trial_index}</label>
-              <div>{trial.visible_output || "No attacker-visible output"}</div>
-              <footer><span>{trial.model_id}</span>{trial.attack_source && <span>{trial.attack_source}</span>}<span>{trial.input_tokens + trial.output_tokens} tokens</span><span>{trial.model_latency_ms.toFixed(0)} ms</span>{trial.raw_model_disclosure && !trial.success && <span className="blocked-badge">Raw disclosure filtered</span>}</footer>
-            </article>
-          </section>
-        ))}
-      </div>
-    );
-  }
+function ArchivedRunEvidence({ run, catalog }: { run: ArchivedRunDetail; catalog: Catalog }) {
+  const staticResult = archivedMatrixRun(run);
+  if (staticResult) return <StaticArchiveEvidence result={staticResult} catalog={catalog} />;
+  if (run.kind === "static") return <div className="archive-error">This archived static result has an invalid shape.</div>;
+  return <AdaptiveArchiveEvidence result={run.result as unknown as AdaptiveRun} catalog={catalog} />;
+}
 
-  const result = run.result as unknown as AdaptiveRun;
+function catalogModelName(catalog: Catalog, modelReference: string): string {
+  const separator = modelReference.indexOf(":");
+  if (separator < 0) return modelReference;
+  const providerId = modelReference.slice(0, separator);
+  const modelId = modelReference.slice(separator + 1);
+  const provider = catalog.providers.find((item) => item.id === providerId);
+  const model = provider?.models.find((item) => item.id === modelId);
+  return `${provider?.name ?? providerId} · ${model?.label ?? modelId}`;
+}
+
+function StaticArchiveEvidence({ result, catalog }: { result: MatrixRun; catalog: Catalog }) {
+  const [selectedCell, setSelectedCell] = useState<{ attackId: string; defenseId: string } | null>(null);
+
+  const attacks = useMemo(
+    () => [...new Set(result.cells.map((cell) => cell.attack_id))],
+    [result],
+  );
+  const defenses = useMemo(
+    () => [...new Set(result.cells.map((cell) => cell.defense_column_id))]
+      .sort((left, right) => left === "baseline" ? -1 : right === "baseline" ? 1 : 0),
+    [result],
+  );
+  const selectedTrials = selectedCell
+    ? result.trials.filter((trial) => (
+      trial.attack_id === selectedCell.attackId
+      && trial.defense_column_id === selectedCell.defenseId
+    ))
+    : [];
+  const selectedAttackName = selectedCell
+    ? catalog.attacks.find((item) => item.id === selectedCell.attackId)?.name ?? selectedCell.attackId
+    : "";
+  const selectedDefenseName = selectedCell
+    ? catalog.defense_columns.find((item) => item.id === selectedCell.defenseId)?.name ?? selectedCell.defenseId
+    : "";
+
   return (
-    <div className="archive-chat">
+    <div className="archive-evidence static-matrix-history">
+      <div className="matrix-history-guide">
+        <div><span className="overline">Step 1</span><strong>Select a matrix cell</strong><small>Attack rows × defense columns</small></div>
+        <span>Click any populated cell to open every matching conversation.</span>
+      </div>
+
+      <div className="archive-matrix-table clickable-matrix">
+        <table>
+          <thead><tr><th>Attack class</th>{defenses.map((defenseId) => <th key={defenseId}>{catalog.defense_columns.find((item) => item.id === defenseId)?.name ?? defenseId}</th>)}</tr></thead>
+          <tbody>{attacks.map((attackId) => (
+            <tr key={attackId}>
+              <td><strong>{catalog.attacks.find((item) => item.id === attackId)?.name ?? attackId}</strong></td>
+              {defenses.map((defenseId) => {
+                const trials = result.trials.filter((trial) => trial.attack_id === attackId && trial.defense_column_id === defenseId);
+                const successes = trials.filter((trial) => trial.success).length;
+                const blocked = trials.filter((trial) => !trial.model_called).length;
+                const isSelected = selectedCell?.attackId === attackId && selectedCell.defenseId === defenseId;
+                return (
+                  <td className={`${successes ? "has-success" : "no-success"} ${isSelected ? "selected" : ""}`} key={defenseId}>
+                    {trials.length ? (
+                      <button onClick={() => setSelectedCell({ attackId, defenseId })}>
+                        <strong>{(100 * successes / trials.length).toFixed(0)}%</strong>
+                        <small>{successes}/{trials.length} attack success · {blocked} blocked</small>
+                        <span>Open {trials.length} conversation{trials.length === 1 ? "" : "s"} →</span>
+                      </button>
+                    ) : <span className="empty-matrix-cell">N/A</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+
+      {selectedCell ? (
+        <section className="matrix-cell-history">
+          <header>
+            <div><span className="overline">Step 2 · Conversation history</span><h3>{selectedAttackName} × {selectedDefenseName}</h3><p>Every trial stored for this matrix intersection.</p></div>
+            <div className="cell-history-count"><strong>{selectedTrials.filter((trial) => trial.success).length}/{selectedTrials.length}</strong><span>attacks succeeded</span></div>
+          </header>
+          <div className="cell-conversations">
+            {selectedTrials.map((trial, index) => {
+              const outcome = !trial.model_called ? "blocked" : trial.success ? "success" : "failed";
+              return (
+                <article className={`archive-conversation static-conversation ${outcome}`} key={`${trial.attack_instance_id}:${trial.model_id}:${trial.trial_index}:${index}`}>
+                  <header>
+                    <div><strong>Trial {trial.trial_index + 1} · {trial.attack_definition_name}</strong><small>{catalogModelName(catalog, trial.model_id)}</small></div>
+                    <span className={`attempt-verdict ${outcome}`}>{outcome === "success" ? "Attack succeeded" : outcome === "blocked" ? "Blocked" : "Attack failed"}</span>
+                  </header>
+                  <article className="lab-message user"><label>Attacker</label><div>{trial.attack_input}</div></article>
+                  {trial.attack_context && <article className="lab-message attacker-model"><label>Injected {trial.attack_delivery.replaceAll("_", " ")}</label><div>{trial.attack_context}</div></article>}
+                  <article className="lab-message assistant"><label>Target through {selectedDefenseName}</label><div>{trial.visible_output || (trial.model_called ? "No visible output" : "Request blocked before the model was called")}</div></article>
+                  <footer className="archive-episode-footer">
+                    <span>{trial.input_tokens + trial.output_tokens} tokens</span>
+                    <span>{trial.model_latency_ms.toFixed(0)} ms model latency</span>
+                    <span>{trial.defense_latency_ms.toFixed(1)} ms defense latency</span>
+                    {trial.raw_model_disclosure && <span>Raw disclosure detected</span>}
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <div className="matrix-cell-placeholder"><span>↑</span><strong>Select one matrix cell</strong><p>Its saved attack and target messages will appear here as a conversation.</p></div>
+      )}
+    </div>
+  );
+}
+
+function AdaptiveArchiveEvidence({ result, catalog }: { result: AdaptiveRun; catalog: Catalog }) {
+  return (
+    <div className="archive-evidence">
+      <div className="archive-summary-grid">
+        <article><span>Attack success rate</span><strong>{result.asr_percent.toFixed(1)}%</strong><small>{result.success_count}/{result.total_episodes} episodes</small></article>
+        <article><span>Target queries</span><strong>{result.total_target_queries}</strong><small>across all episodes</small></article>
+        <article><span>Model calls</span><strong>{result.budget.target_calls}</strong><small>{result.budget.attacker_calls} attacker calls</small></article>
+        <article><span>Status</span><strong>{result.status.replaceAll("_", " ")}</strong><small>{result.budget.elapsed_seconds.toFixed(1)} seconds</small></article>
+      </div>
+      <div className="archive-chat">
       {result.episodes.map((episode, episodeIndex) => (
         <section className="archive-conversation" key={`${episode.attack_instance_id}:${episode.defense_column_id}:${episodeIndex}`}>
           <header>
@@ -840,6 +1113,7 @@ function ArchivedRunTranscript({ run, catalog }: { run: ArchivedRunDetail; catal
           <footer className="archive-episode-footer"><span>{episode.target_queries} target calls</span><span>{episode.attacker_queries} attacker calls</span><span>{episode.terminal_reason.replaceAll("_", " ")}</span></footer>
         </section>
       ))}
+      </div>
     </div>
   );
 }

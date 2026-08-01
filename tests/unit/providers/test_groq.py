@@ -68,6 +68,82 @@ async def test_groq_gateway_redacts_provider_error_body() -> None:
         raise AssertionError("Expected GroqGatewayError")
 
 
+async def test_groq_gateway_retries_temporary_rate_limit() -> None:
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        del request
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "0"},
+                json={"error": {"message": "Rate limit reached"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "model": "openai/gpt-oss-120b",
+                "choices": [{"message": {"content": "Recovered"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+            },
+        )
+
+    gateway = GroqModelGateway(
+        api_key="gsk_test_value",
+        transport=httpx.MockTransport(handler),
+        rate_limit_padding_seconds=0,
+    )
+    response = await gateway.complete(
+        ModelRequest(
+            model_id="openai/gpt-oss-120b",
+            system_prompt="System",
+            messages=(ChatMessage(role="user", content="Hi"),),
+            temperature=0,
+        )
+    )
+
+    assert call_count == 2
+    assert response.output_text == "Recovered"
+
+
+async def test_groq_gateway_stops_after_rate_limit_retry_budget() -> None:
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        del request
+        call_count += 1
+        return httpx.Response(
+            429,
+            headers={"retry-after": "0"},
+            json={"error": {"message": "Rate limit reached for gsk_test_value"}},
+        )
+
+    gateway = GroqModelGateway(
+        api_key="gsk_test_value",
+        transport=httpx.MockTransport(handler),
+        max_rate_limit_retries=2,
+        rate_limit_padding_seconds=0,
+    )
+    request = ModelRequest(
+        model_id="openai/gpt-oss-120b",
+        system_prompt="System",
+        messages=(ChatMessage(role="user", content="Hi"),),
+        temperature=0,
+    )
+
+    try:
+        await gateway.complete(request)
+    except GroqGatewayError as exc:
+        assert call_count == 3
+        assert "after 2 automatic retries" in str(exc)
+        assert "gsk_test_value" not in str(exc)
+    else:
+        raise AssertionError("Expected GroqGatewayError")
+
+
 def test_gateway_repr_never_contains_api_key() -> None:
     gateway = GroqModelGateway(api_key="gsk_repr_secret")
     assert "gsk_repr_secret" not in repr(gateway)

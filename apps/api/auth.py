@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from llmsec.infrastructure.user_accounts import UserAccount, UserAccountStore
 
 DEFAULT_ADMIN_USERNAME = "Ben10"
 DEFAULT_ADMIN_PASSWORD_HASH = (
@@ -23,29 +24,52 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 @dataclass(frozen=True, slots=True)
 class AuthenticatedUser:
+    user_id: str
     username: str
-    role: str = "admin"
+    role: str
 
 
 def configured_admin_username() -> str:
     return os.getenv("OBITO_ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME).strip() or DEFAULT_ADMIN_USERNAME
 
 
-def verify_admin_credentials(username: str, password: str) -> bool:
-    if not hmac.compare_digest(username, configured_admin_username()):
-        return False
-    expected_hash = os.getenv("OBITO_ADMIN_PASSWORD_HASH", DEFAULT_ADMIN_PASSWORD_HASH).strip()
+def configured_admin_password_hash() -> str:
+    expected_hash = (
+        os.getenv("OBITO_ADMIN_PASSWORD_HASH", DEFAULT_ADMIN_PASSWORD_HASH).strip()
+        or DEFAULT_ADMIN_PASSWORD_HASH
+    )
     if os.getenv("OBITO_ADMIN_PASSWORD"):
         expected_hash = _hash_password(os.environ["OBITO_ADMIN_PASSWORD"])
-    return hmac.compare_digest(_hash_password(password), expected_hash)
+    return expected_hash
 
 
-def create_access_token(username: str) -> str:
+user_store = UserAccountStore()
+
+
+def authenticate_user(username: str, password: str) -> AuthenticatedUser | None:
+    _sync_configured_admin()
+    account = user_store.authenticate(username, password)
+    if account is None:
+        return None
+    return AuthenticatedUser(
+        user_id=account.id,
+        username=account.username,
+        role=account.role,
+    )
+
+
+def register_user(username: str, password: str) -> UserAccount:
+    _sync_configured_admin()
+    return user_store.create(username, password)
+
+
+def create_access_token(user: AuthenticatedUser) -> str:
     now = int(time.time())
     ttl = int(os.getenv("OBITO_AUTH_TTL_SECONDS", str(DEFAULT_TOKEN_TTL_SECONDS)))
     payload = {
-        "sub": username,
-        "role": "admin",
+        "sub": user.user_id,
+        "username": user.username,
+        "role": user.role,
         "iat": now,
         "exp": now + ttl,
     }
@@ -57,8 +81,12 @@ def create_access_token(username: str) -> str:
 def require_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> AuthenticatedUser:
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return AuthenticatedUser(username=configured_admin_username())
+    if os.getenv("PYTEST_CURRENT_TEST") and os.getenv("OBITO_TEST_AUTH_BYPASS", "1") == "1":
+        return AuthenticatedUser(
+            user_id="pytest-admin",
+            username=configured_admin_username(),
+            role="admin",
+        )
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,9 +118,23 @@ def _verify_token(token: str) -> AuthenticatedUser | None:
     expires_at = payload.get("exp")
     if not isinstance(subject, str) or not isinstance(expires_at, int):
         return None
-    if subject != configured_admin_username() or expires_at < int(time.time()):
+    if expires_at <= int(time.time()):
         return None
-    return AuthenticatedUser(username=subject, role=str(payload.get("role", "admin")))
+    account = user_store.get(subject)
+    if account is None:
+        return None
+    return AuthenticatedUser(
+        user_id=account.id,
+        username=account.username,
+        role=account.role,
+    )
+
+
+def _sync_configured_admin() -> None:
+    user_store.upsert_admin(
+        configured_admin_username(),
+        configured_admin_password_hash(),
+    )
 
 
 def _hash_password(password: str) -> str:

@@ -93,12 +93,17 @@ class CatalogResponse(BaseModel):
 
 class AuthLoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: SecretStr
+    password: SecretStr = Field(min_length=1, max_length=128)
+
+
+class AuthSignupRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: SecretStr = Field(min_length=8, max_length=128)
 
 
 class AuthSessionResponse(BaseModel):
     username: str
-    role: Literal["admin"]
+    role: Literal["admin", "user"]
     access_token: str
 
 

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 
 import httpx
@@ -20,6 +21,9 @@ class GroqModelGateway:
     provider_id: str = "groq"
     api_base: str = "https://api.groq.com/openai/v1"
     timeout_seconds: float = 60.0
+    max_rate_limit_retries: int = 5
+    max_retry_after_seconds: float = 60.0
+    rate_limit_padding_seconds: float = 0.25
     transport: httpx.AsyncBaseTransport | None = field(default=None, repr=False)
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
@@ -35,23 +39,45 @@ class GroqModelGateway:
         }
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout_seconds,
-                transport=self.transport,
-            ) as client:
-                response = await client.post(
-                    f"{self.api_base}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-        except httpx.HTTPError as exc:
-            raise GroqGatewayError("Groq request failed before a response was received") from exc
+        async with httpx.AsyncClient(
+            timeout=self.timeout_seconds,
+            transport=self.transport,
+        ) as client:
+            rate_limit_retries = 0
+            for attempt in range(max(0, self.max_rate_limit_retries) + 1):
+                try:
+                    response = await client.post(
+                        f"{self.api_base}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                except httpx.HTTPError as exc:
+                    raise GroqGatewayError(
+                        "Groq request failed before a response was received"
+                    ) from exc
+                if response.status_code != 429:
+                    break
+                retry_after = _retry_after_seconds(response)
+                if (
+                    attempt >= self.max_rate_limit_retries
+                    or retry_after is None
+                    or retry_after > self.max_retry_after_seconds
+                ):
+                    break
+                await asyncio.sleep(retry_after + self.rate_limit_padding_seconds)
+                rate_limit_retries += 1
 
         request_id = response.headers.get("x-request-id")
         if response.status_code >= 400:
             detail = _safe_error_detail(response, secret=self.api_key)
-            raise GroqGatewayError(f"Groq returned HTTP {response.status_code}: {detail}")
+            retry_note = (
+                f" after {rate_limit_retries} automatic retries"
+                if response.status_code == 429 and rate_limit_retries
+                else ""
+            )
+            raise GroqGatewayError(
+                f"Groq returned HTTP {response.status_code}{retry_note}: {detail}"
+            )
 
         try:
             body = response.json()
@@ -81,3 +107,13 @@ def _safe_error_detail(response: httpx.Response, *, secret: str) -> str:
     except (TypeError, ValueError):
         pass
     return "provider request rejected"
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None

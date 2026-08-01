@@ -80,7 +80,7 @@ export interface Catalog {
 
 export interface AuthSession {
   username: string;
-  role: "admin";
+  role: "admin" | "user";
   access_token: string;
 }
 
