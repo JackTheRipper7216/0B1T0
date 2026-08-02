@@ -11,7 +11,7 @@ const jakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   applicationName: "0B1T0",
-  title: "0B1T0 — LLM Security Benchmark",
+  title: "0B1T0",
   description: "Orchestrated Benchmark for Injection Testing and Oracles",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
