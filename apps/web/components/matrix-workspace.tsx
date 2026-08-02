@@ -230,7 +230,10 @@ export function MatrixWorkspace() {
   }, [auth]);
 
   const applicableAttacks = useMemo(
-    () => catalog?.attacks.filter((attack) => attack.applicable_target_ids.some((id) => targets.includes(id))) ?? [],
+    () => catalog?.attacks.filter((attack) => (
+      attack.implementation_status === "executable"
+      && attack.applicable_target_ids.some((id) => targets.includes(id))
+    )) ?? [],
     [catalog, targets],
   );
 
@@ -482,7 +485,6 @@ export function MatrixWorkspace() {
               </button>
             ))}
           </div>
-          <div className="postponed-note">Chatbot-only build. RAG and Coding are removed from this evaluation surface.</div>
         </div>
 
         <div className="side-block compact-fields">
@@ -539,9 +541,9 @@ export function MatrixWorkspace() {
               <div className="section-title"><span>02</span><div><h2>Static attack classes</h2><p>The Chatbot supplies the objective; each selected class becomes a matrix row.</p></div></div>
               <div className="option-grid attacks-grid">
                 {applicableAttacks.map((attack) => (
-                  <button className={`option-button ${attacks.includes(attack.id) ? "selected" : ""}`} disabled={attack.implementation_status !== "executable"} key={attack.id} onClick={() => setAttacks(toggleValue(attacks, attack.id))}>
+                  <button className={`option-button ${attacks.includes(attack.id) ? "selected" : ""}`} key={attack.id} onClick={() => setAttacks(toggleValue(attacks, attack.id))}>
                     <span className="check-box">{attacks.includes(attack.id) ? "✓" : ""}</span>
-                    <span><strong>{attack.name}</strong><small>{attack.implementation_status === "planned" ? "Validated corpus pending" : targets.length === 1 ? `${attack.payload_counts[targets[0]] ?? 0} unique payloads` : "Static corpus"}</small></span>
+                    <span><strong>{attack.name}</strong><small>{targets.length === 1 ? `${attack.payload_counts[targets[0]] ?? 0} unique payloads` : "Static corpus"}</small></span>
                   </button>
                 ))}
               </div>

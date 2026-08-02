@@ -88,7 +88,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .target-row small { margin-top: 2px; overflow: hidden; color: var(--subtle); font-size: 8px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .check-box { width: 18px; height: 18px; display: inline-grid; place-items: center; flex: none; border: 1px solid #3b5873; border-radius: 5px; color: #071729; font-size: 10px; font-weight: 800; }
 .selected > .check-box, .selected .provider-toggle > .check-box { border-color: var(--accent); background: var(--accent); }
-.postponed-note { margin-top: 12px; padding: 9px 10px; border-left: 2px solid #38536e; color: var(--subtle); font-size: 8px; line-height: 1.45; }
 .compact-fields { display: grid; gap: 12px; }
 .compact-fields .side-heading { margin-bottom: 0; }
 .compact-fields label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; }
